@@ -1,2 +1,5 @@
 node_modules/
 frondend/node_modules/
+__pycache__/
+*.pyc
+backend/moneycouncil.db
