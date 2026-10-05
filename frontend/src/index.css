@@ -59,27 +59,27 @@
   --font-display: 'Outfit', system-ui, -apple-system, sans-serif;
 }
 
-/* Light Theme Override */
+/* Light Theme Override - Warm Cream & Linen (Eye-friendly) */
 [data-theme="light"] {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #f1f5f9;
-  --bg-surface: rgba(255, 255, 255, 0.85);
-  --bg-surface-hover: rgba(241, 245, 249, 0.9);
-  --bg-surface-solid: #ffffff;
-  --bg-input: #f8fafc;
+  --bg-primary: #fbf9f4;            /* Warm soft cream background */
+  --bg-secondary: #f2ece1;          /* Soft warm linen for sidebars & backdrop */
+  --bg-surface: rgba(255, 253, 248, 0.88); /* Warm ivory glass surface */
+  --bg-surface-hover: rgba(243, 237, 226, 0.94);
+  --bg-surface-solid: #fffefb;      /* Warm crisp ivory card solid */
+  --bg-input: #f4eee3;              /* Muted warm cream input field */
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-primary: #282420;          /* Deep warm espresso (soft on eyes) */
+  --text-secondary: #5f574d;        /* Warm medium charcoal */
+  --text-muted: #8e8578;            /* Warm stone */
 
-  --border-color: rgba(15, 23, 42, 0.08);
-  --border-color-hover: rgba(15, 23, 42, 0.18);
-  --border-focus: #6366f1;
+  --border-color: rgba(65, 52, 38, 0.10);  /* Soft warm border */
+  --border-color-hover: rgba(65, 52, 38, 0.22);
+  --border-focus: #4f46e5;
 
-  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.12);
-  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --shadow-sm: 0 2px 8px rgba(60, 45, 30, 0.05);
+  --shadow-md: 0 4px 18px rgba(60, 45, 30, 0.08);
+  --shadow-lg: 0 10px 30px rgba(60, 45, 30, 0.12);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.18);
 }
 
 /* Base Resets */
