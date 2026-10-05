@@ -1,6 +1,8 @@
 import React, { useState, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
+import { usePinLock } from "../context/PinLockContext";
+import { useSync } from "../context/SyncContext";
 import {
   Shield,
   Cpu,
@@ -16,6 +18,11 @@ import {
   Sparkles,
   Zap,
   Server,
+  Lock,
+  Unlock,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   downloadTransactionsCsv,
@@ -31,12 +38,24 @@ import {
 export const SettingsPage: React.FC = () => {
   const { user, updateSettings } = useAuth();
   const { currency, setCurrency } = useCurrency();
+  const { isPinSet, encryptOffline, autoLockMinutes, setupPin, removePin, lockNow } = usePinLock();
+  const { isOnline } = useSync();
 
   const [selectedCurrency, setSelectedCurrency] = useState(user?.currency || currency);
   const [maxDti, setMaxDti] = useState<number>(user?.settings?.max_dti_ratio || 40.0);
   const [minRunway, setMinRunway] = useState<number>(user?.settings?.min_runway_months || 3.0);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Security / PIN State
+  const [pinInput, setPinInput] = useState("");
+  const [confirmPinInput, setConfirmPinInput] = useState("");
+  const [showPinText, setShowPinText] = useState(false);
+  const [selectedAutoLock, setSelectedAutoLock] = useState<number>(autoLockMinutes || 5);
+  const [encryptDataCheck, setEncryptDataCheck] = useState<boolean>(encryptOffline || false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinSuccess, setPinSuccess] = useState<string | null>(null);
+  const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
 
   // CSV Import State
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -112,6 +131,45 @@ export const SettingsPage: React.FC = () => {
       setRestoreError(err.message || "Failed to restore database from backup.");
     } finally {
       setJsonRestoring(false);
+    }
+  };
+
+  const handleSavePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinError(null);
+    setPinSuccess(null);
+
+    if (pinInput.length < 4 || pinInput.length > 8) {
+      setPinError("PIN must be between 4 and 8 digits.");
+      return;
+    }
+
+    if (pinInput !== confirmPinInput) {
+      setPinError("PINs do not match. Please re-enter.");
+      return;
+    }
+
+    try {
+      await setupPin(pinInput, encryptDataCheck, selectedAutoLock);
+      setPinSuccess(isPinSet ? "PIN and security settings updated successfully!" : "App PIN Lock configured successfully!");
+      setPinInput("");
+      setConfirmPinInput("");
+      setIsChangingPin(false);
+      setTimeout(() => setPinSuccess(null), 4000);
+    } catch (err: any) {
+      setPinError(err.message || "Failed to set PIN.");
+    }
+  };
+
+  const handleRemovePin = async () => {
+    if (!window.confirm("Are you sure you want to disable PIN Lock and local data encryption?")) return;
+    try {
+      await removePin();
+      setPinSuccess("PIN Lock removed.");
+      setIsChangingPin(false);
+      setTimeout(() => setPinSuccess(null), 3000);
+    } catch (err: any) {
+      setPinError(err.message || "Failed to remove PIN.");
     }
   };
 
@@ -210,10 +268,228 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <button type="submit" disabled={loading} className="btn btn-primary" style={{ alignSelf: "flex-start" }}>
+        <button type="submit" disabled={loading} className="btn btn-primary" style={{ alignSelf: "flex-start", minHeight: "44px" }}>
           <span>{loading ? "Saving Settings..." : "Save Preferences"}</span>
         </button>
       </form>
+
+      {/* 2.5. App Security, PIN Lock & Offline Data Encryption */}
+      <div className="glass-panel" style={{ padding: "24px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
+          <div className="flex items-center gap-2">
+            <Lock size={20} style={{ color: "var(--accent-primary)" }} />
+            <h3 style={{ fontSize: "17px" }}>App Security & Local PIN Lock</h3>
+          </div>
+          {isPinSet && (
+            <span className="badge badge-success flex items-center gap-1">
+              <Check size={12} />
+              <span>PIN Protection Active</span>
+            </span>
+          )}
+        </div>
+
+        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
+          Protect your sensitive financial data behind a local PIN lock and derive a 256-bit AES-GCM key via Web Crypto to encrypt IndexedDB records on this device.
+        </p>
+
+        {pinSuccess && (
+          <div className="badge-success flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}>
+            <Check size={16} />
+            <span>{pinSuccess}</span>
+          </div>
+        )}
+
+        {pinError && (
+          <div className="badge-danger flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}>
+            <AlertCircle size={16} />
+            <span>{pinError}</span>
+          </div>
+        )}
+
+        {isPinSet && !isChangingPin ? (
+          <div className="flex flex-col gap-4">
+            <div
+              style={{
+                padding: "16px",
+                borderRadius: "var(--radius-md)",
+                background: "var(--bg-surface-solid)",
+                border: "1px solid var(--border-color)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}
+            >
+              <div className="flex items-center justify-between" style={{ fontSize: "13px" }}>
+                <span style={{ color: "var(--text-secondary)" }}>Auto-lock Idle Timeout:</span>
+                <strong>{autoLockMinutes} minutes</strong>
+              </div>
+              <div className="flex items-center justify-between" style={{ fontSize: "13px" }}>
+                <span style={{ color: "var(--text-secondary)" }}>Offline Data Encryption (AES-GCM):</span>
+                <strong style={{ color: encryptOffline ? "var(--success)" : "var(--text-muted)" }}>
+                  {encryptOffline ? "Enabled (PBKDF2 + AES-GCM)" : "Disabled (Standard IndexedDB)"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={lockNow}
+                className="btn btn-secondary flex items-center gap-2"
+                style={{ minHeight: "44px" }}
+              >
+                <Lock size={16} />
+                <span>Lock App Now</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsChangingPin(true);
+                  setPinInput("");
+                  setConfirmPinInput("");
+                  setPinError(null);
+                }}
+                className="btn btn-secondary flex items-center gap-2"
+                style={{ minHeight: "44px" }}
+              >
+                <KeyRound size={16} />
+                <span>Change PIN or Auto-Lock</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRemovePin}
+                className="btn btn-danger flex items-center gap-2"
+                style={{ minHeight: "44px" }}
+              >
+                <Unlock size={16} />
+                <span>Disable PIN Lock</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSavePin} className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="input-group">
+                <label className="input-label">Set 4-8 Digit PIN</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showPinText ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={8}
+                    required
+                    placeholder="Enter PIN (e.g. 1234)"
+                    className="input-field"
+                    style={{ paddingRight: "40px", minHeight: "44px" }}
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPinText(!showPinText)}
+                    style={{
+                      position: "absolute",
+                      right: "10px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      padding: "4px",
+                    }}
+                  >
+                    {showPinText ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label className="input-label">Confirm PIN</label>
+                <input
+                  type={showPinText ? "text" : "password"}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  required
+                  placeholder="Re-enter PIN"
+                  className="input-field"
+                  style={{ minHeight: "44px" }}
+                  value={confirmPinInput}
+                  onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, ""))}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="input-group">
+                <label className="input-label">Auto-Lock Idle Timeout</label>
+                <select
+                  className="input-field"
+                  style={{ minHeight: "44px" }}
+                  value={selectedAutoLock}
+                  onChange={(e) => setSelectedAutoLock(parseInt(e.target.value) || 5)}
+                >
+                  <option value={1}>1 Minute</option>
+                  <option value={2}>2 Minutes</option>
+                  <option value={5}>5 Minutes (Default)</option>
+                  <option value={15}>15 Minutes</option>
+                  <option value={30}>30 Minutes</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col justify-center">
+                <label className="flex items-start gap-2" style={{ cursor: "pointer", fontSize: "13px" }}>
+                  <input
+                    type="checkbox"
+                    checked={encryptDataCheck}
+                    onChange={(e) => setEncryptDataCheck(e.target.checked)}
+                    style={{ marginTop: "3px", width: "16px", height: "16px" }}
+                  />
+                  <div>
+                    <strong style={{ color: "var(--text-primary)" }}>Encrypt Offline Data (AES-GCM)</strong>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                      Derives cryptographic encryption keys from your PIN using Web Crypto.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: "var(--radius-sm)",
+                background: "rgba(99, 102, 241, 0.08)",
+                border: "1px solid rgba(99, 102, 241, 0.2)",
+                fontSize: "12px",
+                color: "var(--text-secondary)",
+              }}
+            >
+              <strong>Note:</strong> Your PIN is hashed locally using PBKDF2 (100,000 iterations) and never sent to any server. If you forget your PIN, you can log in again online to re-sync your cloud financial data.
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button type="submit" className="btn btn-primary" style={{ minHeight: "44px" }}>
+                <span>{isPinSet ? "Update Security Settings" : "Enable PIN Lock"}</span>
+              </button>
+
+              {isPinSet && isChangingPin && (
+                <button
+                  type="button"
+                  onClick={() => setIsChangingPin(false)}
+                  className="btn btn-secondary"
+                  style={{ minHeight: "44px" }}
+                >
+                  <span>Cancel</span>
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </div>
 
       {/* 3. Data Export & CSV Reports */}
       <div className="glass-panel" style={{ padding: "24px" }}>
@@ -225,12 +501,20 @@ export const SettingsPage: React.FC = () => {
           Download standard, clean CSV exports of your financial records anytime for offline analysis, spreadsheets, or tax filing.
         </p>
 
-        <div className="grid grid-cols-3 gap-3">
+        {!isOnline && (
+          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
+            <AlertCircle size={14} />
+            <span>You are currently offline. Exporting from server requires an active connection.</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadTransactionsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px" }}
+            style={{ padding: "12px 14px", minHeight: "44px" }}
           >
             <Download size={16} />
             <span>Transactions CSV</span>
@@ -238,9 +522,10 @@ export const SettingsPage: React.FC = () => {
 
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadBudgetsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px" }}
+            style={{ padding: "12px 14px", minHeight: "44px" }}
           >
             <Download size={16} />
             <span>Budgets CSV</span>
@@ -248,9 +533,10 @@ export const SettingsPage: React.FC = () => {
 
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadDebtsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px" }}
+            style={{ padding: "12px 14px", minHeight: "44px" }}
           >
             <Download size={16} />
             <span>Debts CSV</span>
@@ -287,14 +573,22 @@ export const SettingsPage: React.FC = () => {
 
             <button
               type="button"
-              disabled={!csvFile || csvImporting}
+              disabled={!isOnline || !csvFile || csvImporting}
               onClick={handleCsvImport}
               className="btn btn-primary flex items-center gap-2"
+              style={{ minHeight: "44px" }}
             >
               {csvImporting ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
               <span>{csvImporting ? "Importing..." : "Upload & Parse CSV"}</span>
             </button>
           </div>
+
+          {!isOnline && (
+            <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", fontSize: "12px" }}>
+              <AlertCircle size={14} />
+              <span>CSV import requires an active internet connection.</span>
+            </div>
+          )}
 
           <label className="flex items-center gap-2" style={{ fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
             <input
@@ -344,7 +638,14 @@ export const SettingsPage: React.FC = () => {
           Create a full, portable snapshot of your entire financial system — including all categories, transactions, budgets, savings goals, debts, and AI Council deliberated decisions.
         </p>
 
-        <div className="grid grid-cols-2 gap-4">
+        {!isOnline && (
+          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
+            <AlertCircle size={14} />
+            <span>Database backup and cloud restore require an active internet connection.</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Backup Export */}
           <div
             style={{
@@ -365,9 +666,10 @@ export const SettingsPage: React.FC = () => {
             </div>
             <button
               type="button"
+              disabled={!isOnline}
               onClick={downloadFullBackupJson}
               className="btn btn-secondary flex items-center justify-center gap-2"
-              style={{ marginTop: "auto" }}
+              style={{ marginTop: "auto", minHeight: "44px" }}
             >
               <Download size={16} />
               <span>Download Backup (.json)</span>
@@ -398,6 +700,7 @@ export const SettingsPage: React.FC = () => {
               type="file"
               accept=".json,application/json"
               className="input-field"
+              disabled={!isOnline}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
                   setJsonFile(e.target.files[0]);
@@ -410,6 +713,7 @@ export const SettingsPage: React.FC = () => {
             <label className="flex items-center gap-2" style={{ fontSize: "12px", cursor: "pointer", color: "var(--text-secondary)" }}>
               <input
                 type="checkbox"
+                disabled={!isOnline}
                 checked={overwriteRestore}
                 onChange={(e) => setOverwriteRestore(e.target.checked)}
               />
@@ -420,10 +724,10 @@ export const SettingsPage: React.FC = () => {
 
             <button
               type="button"
-              disabled={!jsonFile || jsonRestoring}
+              disabled={!isOnline || !jsonFile || jsonRestoring}
               onClick={handleJsonRestore}
               className="btn btn-primary flex items-center justify-center gap-2"
-              style={{ marginTop: "auto" }}
+              style={{ marginTop: "auto", minHeight: "44px" }}
             >
               {jsonRestoring ? <RefreshCw size={16} className="animate-spin" /> : <Layers size={16} />}
               <span>{jsonRestoring ? "Restoring..." : "Restore Database"}</span>

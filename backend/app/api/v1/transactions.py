@@ -106,7 +106,21 @@ async def create_transaction(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new income or expense transaction."""
+    """Create a new income or expense transaction with idempotency support via client_id."""
+    # Idempotency check for offline sync replays
+    if payload.client_id:
+        existing = (
+            db.query(Transaction)
+            .options(joinedload(Transaction.category))
+            .filter(
+                Transaction.user_id == current_user.id,
+                Transaction.client_id == payload.client_id,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+
     if payload.category_id:
         category = (
             db.query(Category)
@@ -125,6 +139,7 @@ async def create_transaction(
         description=payload.description.strip(),
         is_recurring=payload.is_recurring,
         tags=payload.tags,
+        client_id=payload.client_id,
     )
     db.add(transaction)
     db.commit()

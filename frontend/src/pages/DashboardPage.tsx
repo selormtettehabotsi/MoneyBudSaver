@@ -6,6 +6,7 @@ import { CashFlowChart } from "../components/dashboard/CashFlowChart";
 import { BudgetProgress } from "../components/dashboard/BudgetProgress";
 import { DebtTimeline } from "../components/dashboard/DebtTimeline";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
+import { useSync } from "../context/SyncContext";
 import {
   PlusCircle,
   RefreshCw,
@@ -24,6 +25,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onNavigate,
   onOpenNewTransaction,
 }) => {
+  const { loadCachedOrFetch } = useSync();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,10 +35,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await analyticsApi.getDashboard();
-      setData(res);
+      const res = await loadCachedOrFetch(
+        "dashboard_summary",
+        () => analyticsApi.getDashboard(),
+        (cached) => {
+          if (cached) setData(cached);
+        }
+      );
+      if (res) {
+        setData(res);
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to load dashboard data.");
+      if (!data) {
+        setError(err.message || "Failed to load dashboard data.");
+      }
     } finally {
       setLoading(false);
     }

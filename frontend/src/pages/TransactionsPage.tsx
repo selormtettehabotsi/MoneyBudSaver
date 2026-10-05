@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { transactionsApi, TransactionFilterParams } from "../api/transactions";
 import { categoriesApi } from "../api/categories";
-import { Transaction, Category, TransactionType } from "../types/finance";
+import { Transaction, Category, TransactionType, TransactionListResponse } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
+import { useSync } from "../context/SyncContext";
 import { Icon } from "../components/common/Icon";
 import { Modal } from "../components/common/Modal";
 import {
@@ -11,11 +12,13 @@ import {
   Trash2,
   Edit2,
   Filter,
+  Clock,
 } from "lucide-react";
 
 export const TransactionsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const { isOnline, loadCachedOrFetch, createOfflineTransaction, outboxItems } = useSync();
+  const [transactions, setTransactions] = useState<(Transaction & { is_pending_sync?: boolean })[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -43,35 +46,61 @@ export const TransactionsPage: React.FC = () => {
   const [categoryId, setCategoryId] = useState<string>("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
-      const cats = await categoriesApi.list();
-      setCategories(cats);
+      const cats = await loadCachedOrFetch(
+        "categories",
+        () => categoriesApi.list(),
+        (updatedCats: Category[]) => {
+          if (updatedCats) setCategories(updatedCats);
+        }
+      );
+      if (cats) setCategories(cats);
     } catch {}
-  };
+  }, [loadCachedOrFetch]);
 
-  const loadTransactions = async () => {
+  const loadTransactions = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await transactionsApi.list(filters);
-      setTransactions(res.items);
-      setTotalIncome(res.total_income);
-      setTotalExpense(res.total_expense);
-      setNetAmount(res.net_amount);
+      const res = await loadCachedOrFetch(
+        "transactions",
+        () => transactionsApi.list(filters),
+        (updated: TransactionListResponse) => {
+          if (updated && updated.items) {
+            setTransactions(updated.items);
+            setTotalIncome(updated.total_income);
+            setTotalExpense(updated.total_expense);
+            setNetAmount(updated.net_amount);
+          }
+        }
+      );
+      if (res && res.items) {
+        setTransactions(res.items);
+        setTotalIncome(res.total_income);
+        setTotalExpense(res.total_expense);
+        setNetAmount(res.net_amount);
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, loadCachedOrFetch]);
 
   useEffect(() => {
     loadCategories();
-  }, []);
+  }, [loadCategories]);
 
   useEffect(() => {
     loadTransactions();
-  }, [filters]);
+  }, [loadTransactions]);
+
+  // Refresh when quick add or outbox items change
+  useEffect(() => {
+    const handleTxAdded = () => loadTransactions();
+    window.addEventListener("mc_transaction_added", handleTxAdded);
+    return () => window.removeEventListener("mc_transaction_added", handleTxAdded);
+  }, [loadTransactions]);
 
   const handleOpenCreate = () => {
     setEditingTx(null);
@@ -85,6 +114,10 @@ export const TransactionsPage: React.FC = () => {
   };
 
   const handleOpenEdit = (tx: Transaction) => {
+    if (!isOnline) {
+      alert("Editing existing transactions requires an active server connection.");
+      return;
+    }
     setEditingTx(tx);
     setAmount(tx.amount);
     setType(tx.type);
@@ -96,6 +129,10 @@ export const TransactionsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (!isOnline) {
+      alert("Deleting transactions requires an active server connection.");
+      return;
+    }
     if (!window.confirm("Are you sure you want to delete this transaction?")) return;
     try {
       await transactionsApi.delete(id);
@@ -118,7 +155,7 @@ export const TransactionsPage: React.FC = () => {
           category_id: categoryId || null,
         });
       } else {
-        await transactionsApi.create({
+        await createOfflineTransaction({
           amount,
           type,
           date: dateVal,
@@ -245,9 +282,10 @@ export const TransactionsPage: React.FC = () => {
         ) : (
           <div className="flex flex-col gap-3">
             {transactions.map((tx) => {
-              const isIncome = tx.type === "income";
+              const isIncome = tx.category?.type === "income";
               const catColor = tx.category?.color_hex || "#6366f1";
-              const catIcon = tx.category?.icon_name || (isIncome ? "trending-up" : "shopping-cart");
+              const catIcon = tx.category?.icon_name || "tag";
+              const isPending = Boolean(tx.is_pending_sync || outboxItems.some((o) => o.client_id === tx.client_id || o.client_id === tx.id));
 
               return (
                 <div
@@ -257,7 +295,7 @@ export const TransactionsPage: React.FC = () => {
                     padding: "12px 14px",
                     borderRadius: "var(--radius-md)",
                     background: "var(--bg-surface-solid)",
-                    border: "1px solid var(--border-color)",
+                    border: isPending ? "1px dashed rgba(245, 158, 11, 0.5)" : "1px solid var(--border-color)",
                     transition: "all 0.15s ease",
                   }}
                 >
@@ -279,7 +317,15 @@ export const TransactionsPage: React.FC = () => {
                     </div>
 
                     <div className="flex flex-col">
-                      <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{tx.description}</span>
+                      <div className="flex items-center gap-2">
+                        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{tx.description}</span>
+                        {isPending && (
+                          <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "10px", padding: "2px 6px" }}>
+                            <Clock size={10} />
+                            <span>Waiting to sync</span>
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2" style={{ fontSize: "12px", color: "var(--text-muted)" }}>
                         <span>{tx.date}</span>
                         <span>•</span>
@@ -305,28 +351,34 @@ export const TransactionsPage: React.FC = () => {
 
                     <div className="flex items-center gap-1">
                       <button
+                        type="button"
                         onClick={() => handleOpenEdit(tx)}
+                        disabled={!isOnline || isPending}
                         style={{
                           background: "transparent",
                           border: "none",
                           color: "var(--text-secondary)",
-                          cursor: "pointer",
+                          cursor: !isOnline || isPending ? "not-allowed" : "pointer",
+                          opacity: !isOnline || isPending ? 0.4 : 1,
                           padding: "6px",
                         }}
-                        title="Edit"
+                        title={!isOnline ? "Editing requires server connection" : "Edit"}
                       >
                         <Edit2 size={15} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDelete(tx.id)}
+                        disabled={!isOnline || isPending}
                         style={{
                           background: "transparent",
                           border: "none",
                           color: "var(--danger)",
-                          cursor: "pointer",
+                          cursor: !isOnline || isPending ? "not-allowed" : "pointer",
+                          opacity: !isOnline || isPending ? 0.4 : 1,
                           padding: "6px",
                         }}
-                        title="Delete"
+                        title={!isOnline ? "Deleting requires server connection" : "Delete"}
                       >
                         <Trash2 size={15} />
                       </button>

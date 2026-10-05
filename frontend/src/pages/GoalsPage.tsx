@@ -2,11 +2,13 @@ import React, { useState, useEffect } from "react";
 import { goalsApi } from "../api/goals";
 import { SavingsGoal } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
+import { useSync } from "../context/SyncContext";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, Target, ArrowUpRight, ArrowDownLeft, Trash2, Edit2 } from "lucide-react";
+import { PlusCircle, Target, ArrowUpRight, ArrowDownLeft, Trash2, Edit2, AlertCircle } from "lucide-react";
 
 export const GoalsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
+  const { loadCachedOrFetch, isOnline } = useSync();
   const [goals, setGoals] = useState<SavingsGoal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,8 +32,8 @@ export const GoalsPage: React.FC = () => {
   const loadGoals = async () => {
     setLoading(true);
     try {
-      const list = await goalsApi.list();
-      setGoals(list);
+      const list = await loadCachedOrFetch("savings_goals", () => goalsApi.list(), (c) => { if (c) setGoals(c); });
+      if (list) setGoals(list);
     } catch (err) {
       console.error(err);
     } finally {
@@ -141,10 +143,23 @@ export const GoalsPage: React.FC = () => {
           </span>
         </div>
 
-        <button className="btn btn-primary btn-sm" onClick={handleOpenCreate}>
-          <PlusCircle size={15} />
-          <span>New Goal</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {!isOnline && (
+            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
+              <AlertCircle size={12} />
+              <span>Editing offline is disabled</span>
+            </span>
+          )}
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={!isOnline}
+            onClick={handleOpenCreate}
+            title={!isOnline ? "Creating goals requires an active connection" : undefined}
+          >
+            <PlusCircle size={15} />
+            <span>New Goal</span>
+          </button>
+        </div>
       </div>
 
       {/* Summary Banner */}

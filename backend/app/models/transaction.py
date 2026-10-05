@@ -17,6 +17,7 @@ class Transaction(Base):
     description = Column(String(255), nullable=False)
     is_recurring = Column(Boolean, default=False, nullable=False)
     tags = Column(JSON, default=list, nullable=False)
+    client_id = Column(String(36), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships

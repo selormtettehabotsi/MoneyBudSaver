@@ -13,6 +13,7 @@ export interface Category {
 
 export interface Transaction {
   id: string;
+  client_id?: string | null;
   user_id: string;
   category_id: string | null;
   amount: string; // Decimal string representation
@@ -23,6 +24,7 @@ export interface Transaction {
   tags: string[];
   created_at: string;
   category?: Category;
+  is_pending_sync?: boolean;
 }
 
 export interface TransactionListResponse {

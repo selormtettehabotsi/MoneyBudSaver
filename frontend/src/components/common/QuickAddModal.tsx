@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "./Modal";
-import { transactionsApi } from "../../api/transactions";
 import { categoriesApi } from "../../api/categories";
 import { Category, TransactionType } from "../../types/finance";
 import { useCurrency } from "../../context/CurrencyContext";
 import { Plus, RefreshCw } from "lucide-react";
+import { useSync } from "../../context/SyncContext";
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -18,6 +18,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   onSuccess,
 }) => {
   const { currency } = useCurrency();
+  const { createOfflineTransaction, loadCachedOrFetch } = useSync();
   const [categories, setCategories] = useState<Category[]>([]);
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<TransactionType>("expense");
@@ -29,21 +30,32 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      categoriesApi
-        .list()
-        .then((cats) => {
+      loadCachedOrFetch(
+        "categories",
+        () => categoriesApi.list(),
+        (cats: Category[]) => {
+          if (cats) {
+            setCategories(cats);
+            if (cats.length > 0 && !categoryId) {
+              const firstOfType = cats.find((c) => c.type === type);
+              if (firstOfType) setCategoryId(firstOfType.id);
+            }
+          }
+        }
+      ).then((cats) => {
+        if (cats) {
           setCategories(cats);
           if (cats.length > 0 && !categoryId) {
             const firstOfType = cats.find((c) => c.type === type);
             if (firstOfType) setCategoryId(firstOfType.id);
           }
-        })
-        .catch(() => {});
+        }
+      });
       setAmount("");
       setDescription("");
       setError(null);
     }
-  }, [isOpen, type]);
+  }, [isOpen, type, loadCachedOrFetch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +72,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     setError(null);
 
     try {
-      await transactionsApi.create({
+      await createOfflineTransaction({
         amount: parseFloat(amount).toFixed(2),
         type,
         date: dateVal,
@@ -70,7 +82,6 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
       onClose();
       if (onSuccess) onSuccess();
-      // Optional notification event so listeners can refresh
       window.dispatchEvent(new CustomEvent("mc_transaction_added"));
     } catch (err: any) {
       setError(err.message || "Failed to record transaction.");

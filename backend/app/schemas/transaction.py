@@ -18,6 +18,7 @@ class TransactionBase(BaseModel):
     description: str = Field(..., min_length=1, max_length=255)
     is_recurring: bool = False
     tags: List[str] = Field(default_factory=list)
+    client_id: Optional[str] = Field(None, max_length=36, description="Client-generated unique ID for offline sync idempotency")
 
     @field_validator("date")
     @classmethod

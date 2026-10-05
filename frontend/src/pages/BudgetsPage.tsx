@@ -3,12 +3,14 @@ import { budgetsApi } from "../api/budgets";
 import { categoriesApi } from "../api/categories";
 import { BudgetProgress, Category } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
+import { useSync } from "../context/SyncContext";
 import { Icon } from "../components/common/Icon";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, ChevronLeft, ChevronRight, FolderPlus } from "lucide-react";
+import { PlusCircle, ChevronLeft, ChevronRight, FolderPlus, AlertCircle } from "lucide-react";
 
 export const BudgetsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
+  const { loadCachedOrFetch, isOnline } = useSync();
   const today = new Date();
   const [month, setMonth] = useState<number>(today.getMonth() + 1);
   const [year, setYear] = useState<number>(today.getFullYear());
@@ -35,11 +37,11 @@ export const BudgetsPage: React.FC = () => {
     setLoading(true);
     try {
       const [budgetList, catList] = await Promise.all([
-        budgetsApi.list(month, year),
-        categoriesApi.list(),
+        loadCachedOrFetch(`budgets_${year}_${month}`, () => budgetsApi.list(month, year), (c) => { if (c) setBudgets(c); }),
+        loadCachedOrFetch("categories", () => categoriesApi.list(), (c) => { if (c) setCategories(c); }),
       ]);
-      setBudgets(budgetList);
-      setCategories(catList);
+      if (budgetList) setBudgets(budgetList);
+      if (catList) setCategories(catList);
     } catch (err) {
       console.error(err);
     } finally {
@@ -122,18 +124,31 @@ export const BudgetsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button className="btn btn-secondary btn-sm" onClick={() => setIsCategoryModalOpen(true)}>
+          {!isOnline && (
+            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
+              <AlertCircle size={12} />
+              <span>Editing offline is disabled</span>
+            </span>
+          )}
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={!isOnline}
+            onClick={() => setIsCategoryModalOpen(true)}
+            title={!isOnline ? "Creating categories requires an active connection" : undefined}
+          >
             <FolderPlus size={15} />
             <span>New Category</span>
           </button>
           <button
             className="btn btn-primary btn-sm"
+            disabled={!isOnline}
             onClick={() => {
               setSelectedCategoryId(categories[0]?.id || "");
               setAmountLimit("");
               setModalError(null);
               setIsBudgetModalOpen(true);
             }}
+            title={!isOnline ? "Setting budgets requires an active connection" : undefined}
           >
             <PlusCircle size={15} />
             <span>Set Budget Limit</span>

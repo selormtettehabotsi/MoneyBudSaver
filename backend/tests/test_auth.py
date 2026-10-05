@@ -22,10 +22,16 @@ def test_health_check_get_and_head(client, capsys):
 
 def test_security_headers_present(client):
     response = client.get("/health")
-    assert "Content-Security-Policy" in response.headers
-    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    csp = response.headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in csp
+    assert "worker-src 'self'" in csp
+    assert "manifest-src 'self'" in csp
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+    # API endpoints must enforce no-store
+    api_response = client.get("/api/v1/auth/me")
+    assert "no-store" in api_response.headers.get("Cache-Control", "")
 
 
 def test_first_user_registration_and_login(client):

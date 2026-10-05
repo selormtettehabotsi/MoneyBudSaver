@@ -3,6 +3,7 @@ import { councilApi } from "../api/council";
 import { CouncilDecision, ProviderStatusItem } from "../types/council";
 import { useCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/AuthContext";
+import { useSync } from "../context/SyncContext";
 import { CouncilVoteCard } from "../components/council/CouncilVoteCard";
 import { CouncilTallyPanel } from "../components/council/CouncilTallyPanel";
 import { Modal } from "../components/common/Modal";
@@ -19,6 +20,7 @@ import {
   Edit3,
   Layers,
   AlertTriangle,
+  AlertCircle,
 } from "lucide-react";
 
 interface CouncilPageProps {
@@ -28,6 +30,7 @@ interface CouncilPageProps {
 export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => {
   const { user } = useAuth();
   const { currency } = useCurrency();
+  const { loadCachedOrFetch, isOnline } = useSync();
 
   const isHosted = user?.is_hosted || false;
 
@@ -63,11 +66,11 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
   const loadProvidersAndHistory = async () => {
     try {
       const [pList, hList] = await Promise.all([
-        councilApi.getProviders(),
-        councilApi.getHistory(10),
+        loadCachedOrFetch("council_providers", () => councilApi.getProviders(), (c) => { if (c) setProviders(c); }),
+        loadCachedOrFetch("council_history", () => councilApi.getHistory(10), (c) => { if (c) setHistory(c); }),
       ]);
-      setProviders(pList);
-      setHistory(hList);
+      if (pList) setProviders(pList);
+      if (hList) setHistory(hList);
     } catch (err) {
       console.error(err);
     }
@@ -334,13 +337,21 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                 </label>
               </div>
 
+              {!isOnline && (
+                <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", fontSize: "12px" }}>
+                  <AlertCircle size={14} />
+                  <span>AI Council deliberation requires an active internet connection.</span>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row items-center gap-3" style={{ marginTop: "6px" }}>
                 <button
                   type="button"
-                  disabled={!question.trim() || loading}
+                  disabled={!isOnline || !question.trim() || loading}
                   onClick={handlePreviewPrompt}
                   className="btn btn-secondary flex items-center justify-center gap-2"
                   style={{ minHeight: "44px", width: "100%", flex: 1 }}
+                  title={!isOnline ? "Prompt preview requires an active connection" : undefined}
                 >
                   <Eye size={16} />
                   <span>Preview AI Prompt</span>
@@ -348,9 +359,10 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
                 <button
                   type="submit"
-                  disabled={loading || !question.trim()}
+                  disabled={!isOnline || loading || !question.trim()}
                   className="btn btn-primary flex items-center justify-center gap-2"
                   style={{ minHeight: "44px", width: "100%", flex: 2 }}
+                  title={!isOnline ? "Deliberation requires an active connection" : undefined}
                 >
                   {loading ? (
                     <>

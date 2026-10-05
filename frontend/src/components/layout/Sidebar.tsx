@@ -16,6 +16,10 @@ import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
 import { useCurrency } from "../../context/CurrencyContext";
 
+import { usePinLock } from "../../context/PinLockContext";
+import { SyncStatusIndicator } from "../common/SyncStatusIndicator";
+import { Lock } from "lucide-react";
+
 interface SidebarProps {
   currentPage: string;
   onNavigate: (page: string) => void;
@@ -25,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { currency } = useCurrency();
+  const { isPinSet, lockNow } = usePinLock();
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -55,15 +60,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
       <div>
         {/* Logo */}
         <div
-          className="flex items-center gap-3"
-          style={{ padding: "8px 12px", marginBottom: "24px", cursor: "pointer" }}
-          onClick={() => onNavigate("dashboard")}
+          className="flex items-center justify-between"
+          style={{ padding: "8px 12px", marginBottom: "20px" }}
         >
-          <img src="/favicon.svg" alt="MoneyCouncil" style={{ width: "32px", height: "32px" }} />
-          <div>
-            <h2 style={{ fontSize: "17px", fontWeight: 800, letterSpacing: "-0.03em" }}>MoneyCouncil</h2>
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600 }}>AI ADVISOR & BUDGET</span>
+          <div
+            className="flex items-center gap-3"
+            style={{ cursor: "pointer" }}
+            onClick={() => onNavigate("dashboard")}
+          >
+            <img src="/favicon.svg" alt="MoneyCouncil" style={{ width: "32px", height: "32px" }} />
+            <div>
+              <h2 style={{ fontSize: "17px", fontWeight: 800, letterSpacing: "-0.03em" }}>MoneyCouncil</h2>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600 }}>AI ADVISOR & BUDGET</span>
+            </div>
           </div>
+        </div>
+
+        {/* Sync Status Badge */}
+        <div style={{ padding: "0 12px 14px 12px" }}>
+          <SyncStatusIndicator />
         </div>
 
         {/* Nav Links */}
@@ -124,23 +139,46 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
               Currency: {currency}
             </span>
           </div>
-          <button
-            onClick={toggleTheme}
-            style={{
-              background: "var(--bg-surface-solid)",
-              border: "1px solid var(--border-color)",
-              padding: "6px",
-              borderRadius: "var(--radius-sm)",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-            }}
-            title="Toggle theme"
-          >
-            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
+
+          <div className="flex items-center gap-1.5">
+            {isPinSet && (
+              <button
+                type="button"
+                onClick={lockNow}
+                style={{
+                  background: "var(--bg-surface-solid)",
+                  border: "1px solid var(--border-color)",
+                  padding: "6px",
+                  borderRadius: "var(--radius-sm)",
+                  color: "var(--accent-primary)",
+                  cursor: "pointer",
+                }}
+                title="Lock App"
+              >
+                <Lock size={15} />
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              style={{
+                background: "var(--bg-surface-solid)",
+                border: "1px solid var(--border-color)",
+                padding: "6px",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+              }}
+              title="Toggle theme"
+            >
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+          </div>
         </div>
 
         <button
+          type="button"
           onClick={logout}
           className="btn btn-secondary btn-sm"
           style={{ width: "100%", justifyContent: "flex-start", gap: "8px" }}

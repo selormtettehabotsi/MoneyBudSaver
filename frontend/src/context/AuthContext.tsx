@@ -3,6 +3,8 @@ import { User, UserSettings } from "../types/auth";
 import { authApi } from "../api/auth";
 import { useCurrency } from "./CurrencyContext";
 
+import { clearUserData, getOutbox } from "../services/db";
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -55,6 +57,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    const currentUserId = user?.id;
+    if (currentUserId) {
+      try {
+        const outbox = await getOutbox(currentUserId);
+        if (outbox.length > 0) {
+          const proceed = window.confirm(
+            `You have ${outbox.length} unsent offline transaction(s). Logging out will delete unsaved offline records. Proceed with logout?`
+          );
+          if (!proceed) return;
+        }
+        await clearUserData(currentUserId);
+      } catch {
+        // Ignore IndexedDB clean error
+      }
+    }
+
     try {
       await authApi.logout();
     } finally {

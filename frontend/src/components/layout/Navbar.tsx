@@ -1,7 +1,9 @@
 import React from "react";
-import { Sun, Moon, LogOut } from "lucide-react";
+import { Sun, Moon, LogOut, Lock } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
+import { usePinLock } from "../../context/PinLockContext";
+import { SyncStatusIndicator } from "../common/SyncStatusIndicator";
 
 interface NavbarProps {
   currentPageTitle: string;
@@ -10,6 +12,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ currentPageTitle }) => {
   const { theme, toggleTheme } = useTheme();
   const { logout } = useAuth();
+  const { isPinSet, lockNow } = usePinLock();
 
   return (
     <header
@@ -28,7 +31,28 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPageTitle }) => {
       </div>
 
       <div className="flex items-center gap-2">
+        <SyncStatusIndicator />
+
+        {isPinSet && (
+          <button
+            type="button"
+            onClick={lockNow}
+            style={{
+              background: "var(--bg-surface-solid)",
+              border: "1px solid var(--border-color)",
+              padding: "6px",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--accent-primary)",
+              cursor: "pointer",
+            }}
+            title="Lock App"
+          >
+            <Lock size={15} />
+          </button>
+        )}
+
         <button
+          type="button"
           onClick={toggleTheme}
           style={{
             background: "var(--bg-surface-solid)",
@@ -38,11 +62,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPageTitle }) => {
             color: "var(--text-secondary)",
             cursor: "pointer",
           }}
+          title="Toggle Theme"
         >
-          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
         </button>
 
         <button
+          type="button"
           onClick={logout}
           style={{
             background: "var(--bg-surface-solid)",
@@ -54,7 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPageTitle }) => {
           }}
           title="Sign Out"
         >
-          <LogOut size={16} />
+          <LogOut size={15} />
         </button>
       </div>
     </header>

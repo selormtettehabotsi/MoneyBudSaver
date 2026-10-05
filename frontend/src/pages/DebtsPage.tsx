@@ -2,11 +2,13 @@ import React, { useState, useEffect } from "react";
 import { debtsApi } from "../api/debts";
 import { Debt } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
+import { useSync } from "../context/SyncContext";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, CreditCard, Edit2, Trash2, ArrowUpRight } from "lucide-react";
+import { PlusCircle, CreditCard, Edit2, Trash2, ArrowUpRight, AlertCircle } from "lucide-react";
 
 export const DebtsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
+  const { loadCachedOrFetch, isOnline } = useSync();
   const [debts, setDebts] = useState<Debt[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,8 +34,8 @@ export const DebtsPage: React.FC = () => {
   const loadDebts = async () => {
     setLoading(true);
     try {
-      const list = await debtsApi.list();
-      setDebts(list);
+      const list = await loadCachedOrFetch("debts", () => debtsApi.list(), (c) => { if (c) setDebts(c); });
+      if (list) setDebts(list);
     } catch (err) {
       console.error(err);
     } finally {
@@ -151,10 +153,23 @@ export const DebtsPage: React.FC = () => {
           </span>
         </div>
 
-        <button className="btn btn-primary btn-sm" onClick={handleOpenCreate}>
-          <PlusCircle size={15} />
-          <span>Add Loan / Debt</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {!isOnline && (
+            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
+              <AlertCircle size={12} />
+              <span>Editing offline is disabled</span>
+            </span>
+          )}
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={!isOnline}
+            onClick={handleOpenCreate}
+            title={!isOnline ? "Adding debts requires an active connection" : undefined}
+          >
+            <PlusCircle size={15} />
+            <span>Add Loan / Debt</span>
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}

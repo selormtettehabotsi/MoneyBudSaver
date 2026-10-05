@@ -9,6 +9,7 @@ import {
   ImportCsvResponse,
   RestoreBackupResponse,
 } from "../api/data";
+import { useSync } from "../context/SyncContext";
 import {
   Database,
   Upload,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 
 export const DataPage: React.FC = () => {
+  const { isOnline } = useSync();
   // CSV Import State
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [createMissingCats, setCreateMissingCats] = useState(true);
@@ -100,6 +102,13 @@ export const DataPage: React.FC = () => {
           Import transactions from mobile money (MTN, Telecel, M-Pesa) or bank CSV statements with fuzzy header matching and duplicate prevention.
         </p>
 
+        {!isOnline && (
+          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
+            <AlertCircle size={14} />
+            <span>CSV import requires an active internet connection.</span>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <input
@@ -107,6 +116,7 @@ export const DataPage: React.FC = () => {
               type="file"
               accept=".csv,text/csv"
               className="input-field"
+              disabled={!isOnline}
               style={{ flex: 1, minHeight: "44px" }}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
@@ -119,7 +129,7 @@ export const DataPage: React.FC = () => {
 
             <button
               type="button"
-              disabled={!csvFile || csvImporting}
+              disabled={!isOnline || !csvFile || csvImporting}
               onClick={handleCsvImport}
               className="btn btn-primary flex items-center justify-center gap-2"
               style={{ minHeight: "44px" }}
@@ -132,6 +142,7 @@ export const DataPage: React.FC = () => {
           <label className="flex items-center gap-2" style={{ fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
             <input
               type="checkbox"
+              disabled={!isOnline}
               checked={createMissingCats}
               onChange={(e) => setCreateMissingCats(e.target.checked)}
             />
@@ -172,9 +183,17 @@ export const DataPage: React.FC = () => {
           Download clean spreadsheets of your financial history for offline analysis in Excel or Google Sheets.
         </p>
 
+        {!isOnline && (
+          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
+            <AlertCircle size={14} />
+            <span>Exporting CSV data from server requires an active connection.</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadTransactionsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
             style={{ minHeight: "44px" }}
@@ -185,6 +204,7 @@ export const DataPage: React.FC = () => {
 
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadBudgetsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
             style={{ minHeight: "44px" }}
@@ -195,6 +215,7 @@ export const DataPage: React.FC = () => {
 
           <button
             type="button"
+            disabled={!isOnline}
             onClick={downloadDebtsCsv}
             className="btn btn-secondary flex items-center justify-center gap-2"
             style={{ minHeight: "44px" }}
@@ -214,6 +235,13 @@ export const DataPage: React.FC = () => {
         <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
           Export or restore a complete portable snapshot of your entire database: transactions, budgets, goals, debts, and AI Council history.
         </p>
+
+        {!isOnline && (
+          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
+            <AlertCircle size={14} />
+            <span>Database backup and cloud restore require an active internet connection.</span>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Backup Export */}
@@ -236,6 +264,7 @@ export const DataPage: React.FC = () => {
             </div>
             <button
               type="button"
+              disabled={!isOnline}
               onClick={downloadFullBackupJson}
               className="btn btn-secondary flex items-center justify-center gap-2"
               style={{ minHeight: "44px", marginTop: "auto" }}
@@ -269,6 +298,7 @@ export const DataPage: React.FC = () => {
               type="file"
               accept=".json,application/json"
               className="input-field"
+              disabled={!isOnline}
               style={{ minHeight: "44px" }}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
@@ -282,6 +312,7 @@ export const DataPage: React.FC = () => {
             <label className="flex items-center gap-2" style={{ fontSize: "12px", cursor: "pointer", color: "var(--text-secondary)" }}>
               <input
                 type="checkbox"
+                disabled={!isOnline}
                 checked={overwriteRestore}
                 onChange={(e) => setOverwriteRestore(e.target.checked)}
               />
@@ -292,7 +323,7 @@ export const DataPage: React.FC = () => {
 
             <button
               type="button"
-              disabled={!jsonFile || jsonRestoring}
+              disabled={!isOnline || !jsonFile || jsonRestoring}
               onClick={handleJsonRestore}
               className="btn btn-primary flex items-center justify-center gap-2"
               style={{ minHeight: "44px", marginTop: "auto" }}

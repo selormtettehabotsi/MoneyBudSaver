@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { suggestionsApi, WeeklyReviewResult, SuggestionLogOut, SuggestionItem } from "../api/suggestions";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
+import { useSync } from "../context/SyncContext";
 import {
   Sparkles,
   RefreshCw,
@@ -22,6 +23,7 @@ interface SuggestionsPageProps {
 }
 
 export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCouncil }) => {
+  const { loadCachedOrFetch, isOnline } = useSync();
   const [review, setReview] = useState<WeeklyReviewResult | null>(null);
   const [historyLogs, setHistoryLogs] = useState<SuggestionLogOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,11 +35,11 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
     try {
       setLoading(true);
       const [reviewRes, historyRes] = await Promise.all([
-        suggestionsApi.getWeeklyReview(),
-        suggestionsApi.getHistory(),
+        loadCachedOrFetch("weekly_review", () => suggestionsApi.getWeeklyReview(), (c) => { if (c) setReview(c); }),
+        loadCachedOrFetch("suggestions_history", () => suggestionsApi.getHistory(), (c) => { if (c) setHistoryLogs(c); }),
       ]);
-      setReview(reviewRes);
-      setHistoryLogs(historyRes);
+      if (reviewRes) setReview(reviewRes);
+      if (historyRes) setHistoryLogs(historyRes);
     } catch (err) {
       console.error("Failed to load suggestions:", err);
     } finally {
@@ -126,7 +128,8 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
           <button
             className="btn btn-secondary btn-sm"
             onClick={handleGenerate}
-            disabled={refreshing}
+            disabled={!isOnline || refreshing}
+            title={!isOnline ? "Re-auditing requires an active connection" : undefined}
           >
             <RefreshCw size={15} style={{ animation: refreshing ? "spin 1s linear infinite" : "none" }} />
             <span>{refreshing ? "Auditing..." : "Re-Audit"}</span>

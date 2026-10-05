@@ -14,6 +14,10 @@ import { MorePage } from "./pages/MorePage";
 import { SuggestionsPage } from "./pages/SuggestionsPage";
 import { DataPage } from "./pages/DataPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SyncProvider } from "./context/SyncContext";
+import { PinLockProvider } from "./context/PinLockContext";
+import { PinLockScreen } from "./components/common/PinLockScreen";
+import { PwaUpdatePrompt } from "./components/common/PwaUpdatePrompt";
 import { RefreshCw } from "lucide-react";
 
 const AppContent: React.FC = () => {
@@ -108,7 +112,13 @@ export const App: React.FC = () => {
       <CurrencyProvider>
         <ServerStatusProvider>
           <AuthProvider>
-            <AppContent />
+            <SyncProvider>
+              <PinLockProvider>
+                <AppContent />
+                <PinLockScreen />
+                <PwaUpdatePrompt />
+              </PinLockProvider>
+            </SyncProvider>
           </AuthProvider>
         </ServerStatusProvider>
       </CurrencyProvider>

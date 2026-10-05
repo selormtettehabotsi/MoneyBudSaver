@@ -11,7 +11,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
 
-        # Content-Security-Policy with frame-ancestors 'none', script and style protection
+        # Content-Security-Policy with frame-ancestors 'none', worker-src, manifest-src
         csp_policy = (
             "default-src 'self'; "
             "script-src 'self'; "
@@ -19,6 +19,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "font-src 'self' https://fonts.gstatic.com data:; "
             "img-src 'self' data: blob:; "
             "connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*; "
+            "worker-src 'self' blob:; "
+            "manifest-src 'self'; "
             "frame-ancestors 'none'; "
             "object-src 'none'; "
             "base-uri 'self';"
@@ -30,5 +32,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
         response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # Cache-Control Strategy
+        path = request.url.path
+        if path.startswith(("/api/", "/cron/")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        elif path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # HTML shell, service worker, manifest, icons
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
 
         return response

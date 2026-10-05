@@ -166,3 +166,113 @@ def test_debts_and_isolation(make_auth_client):
     # User A records payment
     pay = client_a.post(f"/api/v1/debts/{debt_id}/payment", json={"payment_amount": "300.00"}).json()
     assert Decimal(pay["remaining_balance"]) == Decimal("1500.00")
+
+
+def test_transaction_idempotency_with_client_id(make_auth_client):
+    """Verifies that submitting the same client_id returns the existing transaction idempotently without duplicates."""
+    client, user = make_auth_client("idempotent_user@example.com", "Password123!")
+    client_uuid = "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+
+    # First creation
+    res1 = client.post(
+        "/api/v1/transactions",
+        json={
+            "amount": "250.00",
+            "type": "expense",
+            "date": "2026-10-01",
+            "description": "Offline Queued Groceries",
+            "client_id": client_uuid,
+        },
+    )
+    assert res1.status_code == 201
+    tx1 = res1.json()
+    assert tx1["client_id"] == client_uuid
+    tx1_id = tx1["id"]
+
+    # Replay of identical client_id (e.g. outbox resync)
+    res2 = client.post(
+        "/api/v1/transactions",
+        json={
+            "amount": "250.00",
+            "type": "expense",
+            "date": "2026-10-01",
+            "description": "Offline Queued Groceries",
+            "client_id": client_uuid,
+        },
+    )
+    assert res2.status_code in (200, 201)
+    tx2 = res2.json()
+    assert tx2["id"] == tx1_id  # Must return identical transaction record
+
+    # Verify database has exactly 1 transaction
+    list_res = client.get("/api/v1/transactions")
+    assert list_res.json()["total_count"] == 1
+
+
+def test_database_migration_with_existing_rows(tmp_path):
+    """
+    Verifies that the startup schema migration safely adds the client_id column
+    to an existing database that already contains populated rows without data loss.
+    """
+    from sqlalchemy import create_engine, text, inspect
+    from app.db.init_db import run_schema_migrations
+
+    # Create a legacy database without client_id column
+    test_db_path = tmp_path / "legacy_test.db"
+    legacy_engine = create_engine(f"sqlite:///{test_db_path}")
+
+    with legacy_engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE users (
+                id VARCHAR(36) PRIMARY KEY,
+                email VARCHAR(255) NOT NULL,
+                hashed_password VARCHAR(255) NOT NULL,
+                currency VARCHAR(10) NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                settings JSON NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE transactions (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                category_id VARCHAR(36),
+                amount NUMERIC(14, 2) NOT NULL,
+                type VARCHAR(20) NOT NULL,
+                date DATE NOT NULL,
+                description VARCHAR(255) NOT NULL,
+                is_recurring BOOLEAN NOT NULL DEFAULT 0,
+                tags JSON NOT NULL DEFAULT '[]',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        # Insert pre-existing rows
+        conn.execute(text("""
+            INSERT INTO users (id, email, hashed_password, currency)
+            VALUES ('u1', 'legacy@example.com', 'hash', 'GHS')
+        """))
+        conn.execute(text("""
+            INSERT INTO transactions (id, user_id, amount, type, date, description)
+            VALUES ('t1', 'u1', 50.00, 'expense', '2026-09-15', 'Pre-existing Transaction')
+        """))
+
+    # Verify client_id was absent
+    inspector_before = inspect(legacy_engine)
+    assert "client_id" not in [c["name"] for c in inspector_before.get_columns("transactions")]
+
+    # Run migration
+    run_schema_migrations(legacy_engine)
+
+    # Verify column added
+    inspector_after = inspect(legacy_engine)
+    assert "client_id" in [c["name"] for c in inspector_after.get_columns("transactions")]
+
+    # Verify pre-existing data was preserved
+    with legacy_engine.connect() as conn:
+        row = conn.execute(text("SELECT id, amount, description, client_id FROM transactions WHERE id = 't1'")).fetchone()
+        assert row is not None
+        assert row[0] == "t1"
+        assert float(row[1]) == 50.00
+        assert row[2] == "Pre-existing Transaction"
+        assert row[3] is None
