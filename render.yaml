@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: moneycouncil
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEPLOYMENT_MODE
+        value: hosted
+      - key: SECRET_KEY
+        generateValue: true
+      - key: INTERNAL_CRON_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # Paste Neon.tech or Supabase PostgreSQL connection string here
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"

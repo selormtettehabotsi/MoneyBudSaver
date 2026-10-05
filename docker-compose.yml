@@ -1,0 +1,30 @@
+services:
+  moneycouncil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moneycouncil_app
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=MoneyCouncil
+      - ENVIRONMENT=production
+      - DEPLOYMENT_MODE=local
+      - SECRET_KEY=replace_with_a_secure_random_string_at_least_32_characters_long!
+      - INTERNAL_CRON_SECRET=replace_with_a_secure_cron_secret_for_scheduled_audits_123
+      - DATABASE_URL=sqlite:////app/data/moneycouncil.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - moneycouncil_data:/app/data
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  moneycouncil_data:
+    name: moneycouncil_persistent_storage
