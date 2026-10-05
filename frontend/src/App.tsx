@@ -26,6 +26,10 @@ const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<string>("dashboard");
   const [councilPrefill, setCouncilPrefill] = useState<string>("");
 
+  React.useEffect(() => {
+    (window as any).__navigateTo = setCurrentPage;
+  }, []);
+
   if (loading) {
     return (
       <div

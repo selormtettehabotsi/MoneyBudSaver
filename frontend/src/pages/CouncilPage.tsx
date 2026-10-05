@@ -238,7 +238,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
             {/* Quick Sample Presets */}
             <div className="flex items-center gap-2" style={{ flexWrap: "wrap", marginBottom: "14px" }}>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Presets:</span>
+              <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", alignSelf: "center" }}>Presets:</span>
               {sampleQuestions.map((q, idx) => (
                 <button
                   key={idx}
@@ -248,13 +248,13 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                     setDecisionType(q.type);
                     setCandidateAmount(q.amount);
                   }}
+                  className="btn-secondary"
                   style={{
-                    background: "var(--bg-surface-solid)",
-                    border: "1px solid var(--border-color)",
                     borderRadius: "var(--radius-sm)",
-                    padding: "4px 8px",
-                    fontSize: "11px",
-                    color: "var(--text-secondary)",
+                    padding: "8px 12px",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    minHeight: "44px",
                     cursor: "pointer",
                   }}
                 >

@@ -300,33 +300,37 @@ export const TransactionsPage: React.FC = () => {
                   }}
                 >
                   {/* Left info */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3" style={{ minWidth: 0, flex: 1 }}>
                     <div
                       style={{
-                        width: "36px",
-                        height: "36px",
+                        width: "40px",
+                        height: "40px",
+                        minWidth: "40px",
                         borderRadius: "8px",
                         background: `${catColor}20`,
                         color: catColor,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
+                        flexShrink: 0,
                       }}
                     >
                       <Icon name={catIcon} size={18} color={catColor} />
                     </div>
 
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{tx.description}</span>
+                    <div className="flex flex-col" style={{ minWidth: 0 }}>
+                      <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tx.description}>
+                          {tx.description}
+                        </span>
                         {isPending && (
-                          <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "10px", padding: "2px 6px" }}>
+                          <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "0.6875rem", padding: "2px 6px" }}>
                             <Clock size={10} />
                             <span>Waiting to sync</span>
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2" style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                      <div className="flex items-center gap-2" style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
                         <span>{tx.date}</span>
                         <span>•</span>
                         <span style={{ color: catColor, fontWeight: 500 }}>
@@ -337,10 +341,11 @@ export const TransactionsPage: React.FC = () => {
                   </div>
 
                   {/* Right Amount & Actions */}
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3" style={{ flexShrink: 0 }}>
                     <span
+                      className="tabular-nums"
                       style={{
-                        fontSize: "16px",
+                        fontSize: "clamp(0.9375rem, 3vw, 1.05rem)",
                         fontWeight: 700,
                         color: isIncome ? "var(--success)" : "var(--text-primary)",
                       }}
@@ -354,33 +359,30 @@ export const TransactionsPage: React.FC = () => {
                         type="button"
                         onClick={() => handleOpenEdit(tx)}
                         disabled={!isOnline || isPending}
+                        className="btn-icon"
                         style={{
-                          background: "transparent",
-                          border: "none",
-                          color: "var(--text-secondary)",
                           cursor: !isOnline || isPending ? "not-allowed" : "pointer",
                           opacity: !isOnline || isPending ? 0.4 : 1,
-                          padding: "6px",
                         }}
                         title={!isOnline ? "Editing requires server connection" : "Edit"}
+                        aria-label="Edit transaction"
                       >
-                        <Edit2 size={15} />
+                        <Edit2 size={18} />
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDelete(tx.id)}
                         disabled={!isOnline || isPending}
+                        className="btn-icon"
                         style={{
-                          background: "transparent",
-                          border: "none",
                           color: "var(--danger)",
                           cursor: !isOnline || isPending ? "not-allowed" : "pointer",
                           opacity: !isOnline || isPending ? 0.4 : 1,
-                          padding: "6px",
                         }}
                         title={!isOnline ? "Deleting requires server connection" : "Delete"}
+                        aria-label="Delete transaction"
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </div>

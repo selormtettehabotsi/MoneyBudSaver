@@ -21,66 +21,69 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPageTitle }) => {
         display: "none",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "12px 16px",
-        margin: "12px 12px 0 12px",
+        padding: "calc(10px + env(safe-area-inset-top, 0px)) 16px 10px 16px",
+        margin: "0 0 16px 0",
+        position: "sticky",
+        top: 0,
+        zIndex: 400,
+        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
       }}
     >
-      <div className="flex items-center gap-2">
-        <img src="/favicon.svg" alt="Logo" style={{ width: "24px", height: "24px" }} />
-        <h2 style={{ fontSize: "16px" }}>{currentPageTitle}</h2>
+      <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+        <img src="/favicon.svg" alt="Logo" style={{ width: "26px", height: "26px", flexShrink: 0 }} />
+        <h2 style={{ fontSize: "1.05rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {currentPageTitle}
+        </h2>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
         <SyncStatusIndicator />
 
         {isPinSet && (
           <button
             type="button"
             onClick={lockNow}
+            className="btn-icon"
             style={{
               background: "var(--bg-surface-solid)",
               border: "1px solid var(--border-color)",
-              padding: "6px",
-              borderRadius: "var(--radius-sm)",
               color: "var(--accent-primary)",
-              cursor: "pointer",
             }}
             title="Lock App"
+            aria-label="Lock App"
           >
-            <Lock size={15} />
+            <Lock size={18} />
           </button>
         )}
 
         <button
           type="button"
           onClick={toggleTheme}
+          className="btn-icon"
           style={{
             background: "var(--bg-surface-solid)",
             border: "1px solid var(--border-color)",
-            padding: "6px",
-            borderRadius: "var(--radius-sm)",
             color: "var(--text-secondary)",
-            cursor: "pointer",
           }}
           title="Toggle Theme"
+          aria-label="Toggle Theme"
         >
-          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
         <button
           type="button"
           onClick={logout}
+          className="btn-icon"
           style={{
             background: "var(--bg-surface-solid)",
             border: "1px solid var(--border-color)",
-            padding: "6px",
-            borderRadius: "var(--radius-sm)",
             color: "var(--danger)",
-            cursor: "pointer",
           }}
           title="Sign Out"
+          aria-label="Sign Out"
         >
-          <LogOut size={15} />
+          <LogOut size={18} />
         </button>
       </div>
     </header>

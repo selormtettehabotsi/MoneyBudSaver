@@ -92,28 +92,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToRegister }) =>
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{ paddingLeft: "38px", paddingRight: "40px" }}
+                style={{ paddingLeft: "38px", paddingRight: "46px" }}
               />
-              <Lock size={16} style={{ position: "absolute", left: "12px", top: "14px", color: "var(--text-muted)" }} />
+              <Lock size={16} style={{ position: "absolute", left: "12px", top: "14px", color: "var(--text-muted)", pointerEvents: "none" }} />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
+                className="btn-icon"
                 style={{
                   position: "absolute",
-                  right: "12px",
-                  top: "12px",
+                  right: 0,
+                  top: 0,
+                  width: "44px",
+                  height: "44px",
+                  minWidth: "44px",
+                  minHeight: "44px",
                   background: "transparent",
                   border: "none",
                   color: "var(--text-muted)",
                   cursor: "pointer",
-                  padding: "2px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
                 }}
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
@@ -122,19 +123,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToRegister }) =>
             type="submit"
             disabled={loading}
             className="btn btn-primary"
-            style={{ width: "100%", marginTop: "8px" }}
+            style={{ width: "100%", marginTop: "8px", minHeight: "44px" }}
           >
             <span>{loading ? "Signing in..." : "Sign In"}</span>
-            <ArrowRight size={16} />
+            <ArrowRight size={18} />
           </button>
         </form>
 
         {/* Switch to Register */}
-        <div style={{ textAlign: "center", fontSize: "13px", color: "var(--text-secondary)" }}>
-          Don't have an account yet?{" "}
+        <div style={{ textAlign: "center", fontSize: "0.875rem", color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
+          <span>Don't have an account yet?</span>
           <button
+            type="button"
             onClick={onNavigateToRegister}
-            style={{ background: "none", border: "none", color: "var(--accent-primary)", fontWeight: 600, cursor: "pointer" }}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--accent-primary)",
+              fontWeight: 600,
+              cursor: "pointer",
+              minHeight: "44px",
+              minWidth: "44px",
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "4px 8px",
+            }}
           >
             Create Account
           </button>

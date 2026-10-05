@@ -1,0 +1,310 @@
+[
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "360x640",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "360x640",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "360x640",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "360x640",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "360x640",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "360x640",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "360x640",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "360x640",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Suggestions",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Suggestions",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "390x844",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "390x844",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "390x844",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "390x844",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "390x844",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "430x932",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "430x932",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "430x932",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "430x932",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "430x932",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "430x932",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "430x932",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "430x932",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "768x1024",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "768x1024",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "768x1024",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "768x1024",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "768x1024",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "768x1024",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "768x1024",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "768x1024",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Suggestions",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Suggestions",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "1280x800",
+    "theme": "light",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "1280x800",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Data",
+    "viewport": "1280x800",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "1280x800",
+    "theme": "dark",
+    "details": "<button> \"Show password\" is only 20x20px"
+  },
+  {
+    "type": "Small Tap Target (<44x44px)",
+    "page": "Settings",
+    "viewport": "1280x800",
+    "theme": "dark",
+    "details": "<button> \"Create Account\" is only 98x16px"
+  }
+]

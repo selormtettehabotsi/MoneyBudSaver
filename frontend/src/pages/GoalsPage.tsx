@@ -231,14 +231,14 @@ export const GoalsPage: React.FC = () => {
                   </div>
 
                   {/* Amount Breakdown */}
-                  <div className="flex items-center justify-between" style={{ fontSize: "13px" }}>
+                  <div className="flex items-center justify-between tabular-nums" style={{ fontSize: "0.8125rem" }}>
                     <div>
                       <span style={{ color: "var(--text-muted)" }}>Saved: </span>
                       <strong style={{ color: "var(--success)" }}>{formatMoney(g.current_amount)}</strong>
                     </div>
                     <div>
                       <span style={{ color: "var(--text-muted)" }}>Target: </span>
-                      <strong>{formatMoney(g.target_amount)}</strong>
+                      <strong style={{ color: "var(--text-primary)" }}>{formatMoney(g.target_amount)}</strong>
                     </div>
                   </div>
                 </div>
@@ -246,21 +246,23 @@ export const GoalsPage: React.FC = () => {
                 {/* Actions */}
                 <div
                   className="flex items-center justify-between"
-                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px" }}
+                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px", flexWrap: "wrap", gap: "8px" }}
                 >
                   <div className="flex items-center gap-2">
                     <button
                       className="btn btn-success btn-sm"
                       onClick={() => handleOpenAdjust(g, true)}
+                      style={{ minHeight: "44px" }}
                     >
-                      <ArrowUpRight size={14} />
+                      <ArrowUpRight size={16} />
                       <span>Deposit</span>
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => handleOpenAdjust(g, false)}
+                      style={{ minHeight: "44px" }}
                     >
-                      <ArrowDownLeft size={14} />
+                      <ArrowDownLeft size={16} />
                       <span>Withdraw</span>
                     </button>
                   </div>
@@ -268,17 +270,20 @@ export const GoalsPage: React.FC = () => {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => handleOpenEdit(g)}
-                      style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "4px" }}
-                      title="Edit"
+                      className="btn-icon"
+                      title="Edit Goal"
+                      aria-label="Edit Goal"
                     >
-                      <Edit2 size={15} />
+                      <Edit2 size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(g.id)}
-                      style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "4px" }}
-                      title="Delete"
+                      className="btn-icon"
+                      style={{ color: "var(--danger)" }}
+                      title="Delete Goal"
+                      aria-label="Delete Goal"
                     >
-                      <Trash2 size={15} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>

@@ -224,16 +224,16 @@ export const DebtsPage: React.FC = () => {
                   </div>
 
                   {/* Numbers */}
-                  <div className="flex items-center justify-between" style={{ margin: "14px 0 8px 0" }}>
+                  <div className="flex items-center justify-between tabular-nums" style={{ margin: "14px 0 8px 0" }}>
                     <div>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Remaining Balance</span>
-                      <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--danger)" }}>
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Remaining Balance</span>
+                      <div style={{ fontSize: "clamp(1.1rem, 3.5vw, 1.35rem)", fontWeight: 700, color: "var(--danger)" }}>
                         {formatMoney(d.remaining_balance)}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Monthly Payment</span>
-                      <div style={{ fontSize: "15px", fontWeight: 600 }}>{formatMoney(d.minimum_payment)}</div>
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Monthly Payment</span>
+                      <div style={{ fontSize: "0.9375rem", fontWeight: 600 }}>{formatMoney(d.minimum_payment)}</div>
                     </div>
                   </div>
 
@@ -249,7 +249,7 @@ export const DebtsPage: React.FC = () => {
                   </div>
 
                   {/* Timeline Estimates */}
-                  <div className="flex items-center justify-between" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "8px" }}>
+                  <div className="flex items-center justify-between tabular-nums" style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "8px" }}>
                     <span>Paid: {d.payoff_progress_percentage.toFixed(0)}%</span>
                     <span>
                       {d.months_to_payoff !== null
@@ -264,31 +264,35 @@ export const DebtsPage: React.FC = () => {
                 {/* Actions */}
                 <div
                   className="flex items-center justify-between"
-                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px" }}
+                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px", flexWrap: "wrap", gap: "8px" }}
                 >
                   <button
                     className="btn btn-success btn-sm"
                     onClick={() => handleOpenPayment(d)}
                     disabled={isZero}
+                    style={{ minHeight: "44px" }}
                   >
-                    <ArrowUpRight size={14} />
+                    <ArrowUpRight size={16} />
                     <span>Record Payment</span>
                   </button>
 
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => handleOpenEdit(d)}
-                      style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "4px" }}
-                      title="Edit"
+                      className="btn-icon"
+                      title="Edit Loan"
+                      aria-label="Edit Loan"
                     >
-                      <Edit2 size={15} />
+                      <Edit2 size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(d.id)}
-                      style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "4px" }}
-                      title="Delete"
+                      className="btn-icon"
+                      style={{ color: "var(--danger)" }}
+                      title="Delete Loan"
+                      aria-label="Delete Loan"
                     >
-                      <Trash2 size={15} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>

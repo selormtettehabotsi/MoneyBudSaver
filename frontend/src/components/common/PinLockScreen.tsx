@@ -238,17 +238,21 @@ export const PinLockScreen: React.FC = () => {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex items-center gap-1"
+          className="flex items-center gap-1.5"
           style={{
             background: "transparent",
             border: "none",
             color: "var(--text-muted)",
-            fontSize: "12px",
+            fontSize: "0.8125rem",
             cursor: "pointer",
             marginTop: "8px",
+            minHeight: "44px",
+            minWidth: "44px",
+            padding: "8px 12px",
+            justifyContent: "center",
           }}
         >
-          <LogOut size={13} />
+          <LogOut size={15} />
           <span>Forgot PIN? Log Out & Re-sync</span>
         </button>
       </div>

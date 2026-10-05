@@ -28,13 +28,16 @@ export const SyncStatusIndicator: React.FC = () => {
           className="badge badge-warning flex items-center gap-1.5"
           style={{
             cursor: pendingCount > 0 ? "pointer" : "default",
-            padding: "4px 8px",
-            fontSize: "11px",
+            padding: "8px 12px",
+            fontSize: "0.75rem",
+            minHeight: "44px",
+            minWidth: "44px",
             border: "1px solid rgba(245, 158, 11, 0.4)",
           }}
           title={pendingCount > 0 ? `${pendingCount} offline transaction(s) queued` : "Offline mode active"}
+          aria-label={pendingCount > 0 ? `${pendingCount} offline transaction queued` : "Offline mode"}
         >
-          <WifiOff size={12} />
+          <WifiOff size={14} />
           <span>Offline {pendingCount > 0 ? `(${pendingCount})` : ""}</span>
         </button>
       );
@@ -44,9 +47,9 @@ export const SyncStatusIndicator: React.FC = () => {
       return (
         <span
           className="badge badge-secondary flex items-center gap-1.5"
-          style={{ padding: "4px 8px", fontSize: "11px" }}
+          style={{ padding: "8px 12px", fontSize: "0.75rem", minHeight: "44px", minWidth: "44px" }}
         >
-          <RefreshCw size={12} className="animate-spin" />
+          <RefreshCw size={14} className="animate-spin" />
           <span>Syncing...</span>
         </span>
       );
@@ -58,9 +61,10 @@ export const SyncStatusIndicator: React.FC = () => {
           type="button"
           onClick={() => setIsOutboxModalOpen(true)}
           className="badge badge-warning flex items-center gap-1.5"
-          style={{ cursor: "pointer", padding: "4px 8px", fontSize: "11px" }}
+          style={{ cursor: "pointer", padding: "8px 12px", fontSize: "0.75rem", minHeight: "44px", minWidth: "44px" }}
+          aria-label={`${pendingCount} pending items in sync queue`}
         >
-          <Clock size={12} />
+          <Clock size={14} />
           <span>{pendingCount} Pending Sync</span>
         </button>
       );
@@ -73,13 +77,16 @@ export const SyncStatusIndicator: React.FC = () => {
         className="badge badge-success flex items-center gap-1.5"
         style={{
           cursor: "pointer",
-          padding: "4px 8px",
-          fontSize: "11px",
+          padding: "8px 12px",
+          fontSize: "0.75rem",
+          minHeight: "44px",
+          minWidth: "44px",
           background: "rgba(16, 185, 129, 0.12)",
         }}
         title={lastSyncedAt ? `Last synced at ${lastSyncedAt.toLocaleTimeString()}` : "Synced"}
+        aria-label="Trigger Sync"
       >
-        <CheckCircle2 size={12} />
+        <CheckCircle2 size={14} />
         <span>Synced</span>
       </button>
     );
@@ -96,7 +103,7 @@ export const SyncStatusIndicator: React.FC = () => {
         title="Offline Sync Queue (Outbox)"
       >
         <div className="flex flex-col gap-4">
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
             The following transactions were recorded while offline on this device. They will automatically sync to the server when connection returns.
           </p>
 
@@ -106,7 +113,7 @@ export const SyncStatusIndicator: React.FC = () => {
                 textAlign: "center",
                 padding: "24px 0",
                 color: "var(--text-muted)",
-                fontSize: "13px",
+                fontSize: "0.875rem",
               }}
             >
               No pending transactions in outbox.
@@ -125,45 +132,46 @@ export const SyncStatusIndicator: React.FC = () => {
                       border: `1px solid ${isFailed ? "var(--danger-border)" : "var(--border-color)"}`,
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "between",
+                      justifyContent: "space-between",
                       gap: "12px",
                     }}
                   >
-                    <div style={{ flex: 1 }}>
-                      <div className="flex items-center gap-2">
-                        <strong style={{ fontSize: "14px" }}>{item.payload.description || "Untitled Transaction"}</strong>
-                        <span className={`badge ${isFailed ? "badge-danger" : "badge-warning"}`} style={{ fontSize: "10px" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: "0.875rem" }}>{item.payload.description || "Untitled Transaction"}</strong>
+                        <span className={`badge ${isFailed ? "badge-danger" : "badge-warning"}`} style={{ fontSize: "0.6875rem" }}>
                           {isFailed ? "Failed" : "Waiting to sync"}
                         </span>
                       </div>
-                      <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+                      <div className="tabular-nums" style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "2px" }}>
                         {item.payload.date} • {formatMoney(item.payload.amount)} ({item.payload.type})
                       </div>
                       {item.error_message && (
-                        <div style={{ fontSize: "11px", color: "var(--accent-rose)", marginTop: "4px" }}>
+                        <div style={{ fontSize: "0.6875rem", color: "var(--danger)", marginTop: "4px" }}>
                           {item.error_message}
                         </div>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
                       <button
                         type="button"
                         onClick={() => retryOutboxItem(item.client_id)}
-                        className="btn btn-ghost"
-                        style={{ padding: "6px" }}
+                        className="btn-icon"
                         title="Retry sync"
+                        aria-label="Retry sync"
                       >
-                        <RotateCcw size={15} />
+                        <RotateCcw size={18} />
                       </button>
                       <button
                         type="button"
                         onClick={() => discardOutboxItem(item.client_id)}
-                        className="btn btn-ghost"
-                        style={{ padding: "6px", color: "var(--accent-rose)" }}
+                        className="btn-icon"
+                        style={{ color: "var(--danger)" }}
                         title="Discard from outbox"
+                        aria-label="Discard from outbox"
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </div>
@@ -172,7 +180,7 @@ export const SyncStatusIndicator: React.FC = () => {
             </div>
           )}
 
-          <div className="flex items-center justify-between" style={{ marginTop: "8px" }}>
+          <div className="flex items-center justify-between gap-3" style={{ marginTop: "8px", flexWrap: "wrap" }}>
             <button
               type="button"
               disabled={!isOnline || outboxItems.length === 0}
@@ -180,14 +188,16 @@ export const SyncStatusIndicator: React.FC = () => {
                 await triggerSync();
               }}
               className="btn btn-primary flex items-center gap-2"
+              style={{ minHeight: "44px" }}
             >
-              <RefreshCw size={15} />
+              <RefreshCw size={16} />
               <span>Sync All Now</span>
             </button>
             <button
               type="button"
               onClick={() => setIsOutboxModalOpen(false)}
               className="btn btn-secondary"
+              style={{ minHeight: "44px" }}
             >
               Close
             </button>

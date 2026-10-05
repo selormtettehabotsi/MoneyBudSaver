@@ -85,15 +85,17 @@ export const Layout: React.FC<LayoutProps> = ({ currentPage, onNavigate, childre
         style={{
           display: "none", // Shown on mobile via CSS
           position: "fixed",
-          bottom: "calc(74px + env(safe-area-inset-bottom, 0px))",
-          right: "18px",
+          bottom: "calc(76px + env(safe-area-inset-bottom, 0px))",
+          right: "16px",
           width: "52px",
           height: "52px",
+          minWidth: "52px",
+          minHeight: "52px",
           borderRadius: "50%",
           background: "linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-purple) 100%)",
           color: "#ffffff",
           border: "none",
-          boxShadow: "0 6px 20px rgba(99, 102, 241, 0.4)",
+          boxShadow: "0 6px 20px rgba(99, 102, 241, 0.45)",
           cursor: "pointer",
           zIndex: 490,
           alignItems: "center",
@@ -101,7 +103,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentPage, onNavigate, childre
           transition: "transform 0.18s ease, box-shadow 0.18s ease",
         }}
       >
-        <Plus size={26} strokeWidth={2.5} />
+        <Plus size={28} strokeWidth={2.5} />
       </button>
 
       {/* Quick Add Modal */}
@@ -128,7 +130,7 @@ export const Layout: React.FC<LayoutProps> = ({ currentPage, onNavigate, childre
             display: flex !important;
           }
           .main-viewport {
-            padding: 8px 12px calc(90px + env(safe-area-inset-bottom, 0px)) 12px !important;
+            padding: 0 16px calc(156px + env(safe-area-inset-bottom, 0px)) 16px !important;
             max-width: 100vw !important;
             overflow-x: hidden !important;
           }

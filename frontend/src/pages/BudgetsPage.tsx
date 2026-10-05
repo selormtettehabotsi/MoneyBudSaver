@@ -135,8 +135,9 @@ export const BudgetsPage: React.FC = () => {
             disabled={!isOnline}
             onClick={() => setIsCategoryModalOpen(true)}
             title={!isOnline ? "Creating categories requires an active connection" : undefined}
+            style={{ minHeight: "44px" }}
           >
-            <FolderPlus size={15} />
+            <FolderPlus size={16} />
             <span>New Category</span>
           </button>
           <button
@@ -149,28 +150,29 @@ export const BudgetsPage: React.FC = () => {
               setIsBudgetModalOpen(true);
             }}
             title={!isOnline ? "Setting budgets requires an active connection" : undefined}
+            style={{ minHeight: "44px" }}
           >
-            <PlusCircle size={15} />
+            <PlusCircle size={16} />
             <span>Set Budget Limit</span>
           </button>
         </div>
       </div>
 
       {/* Month Navigator & Summary Bar */}
-      <div className="glass-panel flex items-center justify-between" style={{ padding: "16px 20px" }}>
-        <div className="flex items-center gap-3">
-          <button className="btn btn-secondary btn-sm" onClick={handlePrevMonth}>
-            <ChevronLeft size={16} />
+      <div className="glass-panel flex items-center justify-between" style={{ padding: "16px 20px", flexWrap: "wrap", gap: "12px" }}>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-secondary btn-sm btn-icon" onClick={handlePrevMonth} aria-label="Previous Month" style={{ minWidth: "44px", minHeight: "44px" }}>
+            <ChevronLeft size={18} />
           </button>
-          <h3 style={{ fontSize: "18px", minWidth: "160px", textAlign: "center" }}>
+          <h3 style={{ fontSize: "1.1rem", minWidth: "140px", textAlign: "center", margin: 0 }}>
             {monthName} {year}
           </h3>
-          <button className="btn btn-secondary btn-sm" onClick={handleNextMonth}>
-            <ChevronRight size={16} />
+          <button className="btn btn-secondary btn-sm btn-icon" onClick={handleNextMonth} aria-label="Next Month" style={{ minWidth: "44px", minHeight: "44px" }}>
+            <ChevronRight size={18} />
           </button>
         </div>
 
-        <div className="flex items-center gap-6" style={{ fontSize: "13px" }}>
+        <div className="flex items-center gap-4 tabular-nums" style={{ fontSize: "0.8125rem", flexWrap: "wrap" }}>
           <div>
             <span style={{ color: "var(--text-muted)" }}>Budgeted: </span>
             <strong style={{ color: "var(--text-primary)" }}>{formatMoney(totalBudgeted)}</strong>
