@@ -1,5 +1,36 @@
+# Dependencies
 node_modules/
-frondend/node_modules/
+frontend/node_modules/
+backend/venv/
+venv/
+
+# Python cache & artifacts
 __pycache__/
 *.pyc
-backend/moneycouncil.db
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+
+# Databases & local state
+backend/moneycouncil.db*
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+backend/.env
+frontend/.env
+
+# Build outputs
+dist/
+frontend/dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db

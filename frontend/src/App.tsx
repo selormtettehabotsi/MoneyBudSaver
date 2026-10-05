@@ -11,6 +11,7 @@ import { TransactionsPage } from "./pages/TransactionsPage";
 import { BudgetsPage } from "./pages/BudgetsPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { DebtsPage } from "./pages/DebtsPage";
+import { CouncilPage } from "./pages/CouncilPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
@@ -65,6 +66,8 @@ const AppContent: React.FC = () => {
         return <GoalsPage />;
       case "debts":
         return <DebtsPage />;
+      case "council":
+        return <CouncilPage />;
       case "settings":
         return <SettingsPage />;
       default:
