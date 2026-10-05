@@ -14,6 +14,7 @@ from app.api.v1 import (
     analytics,
     council,
     suggestions,
+    data,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -27,5 +28,6 @@ api_v1_router.include_router(debts.router)
 api_v1_router.include_router(analytics.router)
 api_v1_router.include_router(council.router)
 api_v1_router.include_router(suggestions.router)
+api_v1_router.include_router(data.router)
 
 __all__ = ["api_v1_router", "health", "internal"]
