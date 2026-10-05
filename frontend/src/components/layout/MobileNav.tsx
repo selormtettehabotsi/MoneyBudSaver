@@ -6,6 +6,7 @@ import {
   Target,
   CreditCard,
   Scale,
+  Sparkles,
   Settings,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentPage, onNavigate })
     { id: "dashboard", label: "Overview", icon: LayoutDashboard },
     { id: "transactions", label: "History", icon: ReceiptText },
     { id: "council", label: "Council", icon: Scale, highlight: true },
+    { id: "suggestions", label: "Review", icon: Sparkles },
     { id: "budgets", label: "Budgets", icon: PieChart },
     { id: "goals", label: "Goals", icon: Target },
     { id: "debts", label: "Debts", icon: CreditCard },

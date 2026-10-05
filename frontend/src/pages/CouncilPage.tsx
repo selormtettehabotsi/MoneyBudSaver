@@ -15,14 +15,18 @@ import {
   Sparkles,
 } from "lucide-react";
 
-export const CouncilPage: React.FC = () => {
+interface CouncilPageProps {
+  initialQuestion?: string;
+}
+
+export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => {
   const { user } = useAuth();
   const { currency } = useCurrency();
 
   const isHosted = user?.is_hosted || false;
 
   // Form State
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialQuestion || "");
   const [decisionType, setDecisionType] = useState<string>("borrow");
   const [candidateAmount, setCandidateAmount] = useState<string>("2000.00");
   const [enableDebate, setEnableDebate] = useState<boolean>(true);

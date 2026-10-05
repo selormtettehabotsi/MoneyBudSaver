@@ -52,6 +52,16 @@ def client():
 
 
 @pytest.fixture
+def db_session():
+    """Direct database session fixture for test setup."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture
 def make_auth_client():
     """Factory fixture to create an authenticated TestClient for a given email."""
     def _create(

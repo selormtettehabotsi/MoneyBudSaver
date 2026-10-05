@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.dependencies import get_db
 from app.models.user import User
+from app.services.suggestions import record_weekly_review
 
 router = APIRouter(prefix="/internal", tags=["Internal Tasks"])
 
@@ -34,9 +35,16 @@ async def trigger_internal_weekly_review(db: Session = Depends(get_db)):
     Executes automated audit for all active users without requiring host-level crons.
     """
     active_users = db.query(User).filter(User.is_active == True).all()
-    # Weekly review generation (to be wired into suggestion engine in Module 5)
+    processed_count = 0
+    for u in active_users:
+        try:
+            record_weekly_review(db, u)
+            processed_count += 1
+        except Exception:
+            pass
+
     return {
         "status": "success",
-        "message": f"Weekly review processed for {len(active_users)} active user(s).",
+        "message": f"Weekly review processed for {processed_count} active user(s).",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

@@ -12,6 +12,7 @@ import { BudgetsPage } from "./pages/BudgetsPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { DebtsPage } from "./pages/DebtsPage";
 import { CouncilPage } from "./pages/CouncilPage";
+import { SuggestionsPage } from "./pages/SuggestionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
@@ -19,6 +20,7 @@ const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
   const [authView, setAuthView] = useState<"login" | "register">("login");
   const [currentPage, setCurrentPage] = useState<string>("dashboard");
+  const [councilPrefill, setCouncilPrefill] = useState<string>("");
 
   if (loading) {
     return (
@@ -48,6 +50,11 @@ const AppContent: React.FC = () => {
     return <LoginPage onNavigateToRegister={() => setAuthView("register")} />;
   }
 
+  const navigateToCouncilWithQuery = (query?: string) => {
+    if (query) setCouncilPrefill(query);
+    setCurrentPage("council");
+  };
+
   // Authenticated Application Views
   const renderCurrentPage = () => {
     switch (currentPage) {
@@ -67,7 +74,9 @@ const AppContent: React.FC = () => {
       case "debts":
         return <DebtsPage />;
       case "council":
-        return <CouncilPage />;
+        return <CouncilPage initialQuestion={councilPrefill} key={councilPrefill} />;
+      case "suggestions":
+        return <SuggestionsPage onNavigateToCouncil={navigateToCouncilWithQuery} />;
       case "settings":
         return <SettingsPage />;
       default:
