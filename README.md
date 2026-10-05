@@ -9,14 +9,14 @@ Built with **FastAPI**, **SQLAlchemy**, and **React 18 + TypeScript + Vite**, Mo
 ## ✨ Key Features
 
 - **🏛️ Multi-AI Council Deliberation Engine**:
-  - Deliberates across Google Gemini, Meta Llama 3.3 (via Groq & Cerebras wafer-scale), Mistral AI, DeepSeek/Qwen (via OpenRouter), and local Ollama.
+  - Deliberates across 4 distinct free model families: Google Gemini, Groq (OpenAI / GPT-OSS), Mistral AI, and OpenRouter (Qwen Family), plus optional paid/trial Cerebras and local Ollama.
   - 2-Round deliberation protocol: Round 1 blind vote $\to$ Round 2 peer debate & revoting $\to$ Confidence-weighted tally ($[-1.0, +1.0]$).
   - Hard mathematical guardrail overrides for excessive Debt-to-Income (DTI) and emergency runway depletion.
 - **📊 Financial Health Score & Automated Review**:
   - 0–100 multi-pillar health score analyzing savings rate, debt safety, runway sufficiency, and category budget discipline.
-  - Automated weekly review engine triggered via authenticated scheduled webhooks (`/internal/weekly-review`).
+  - Automated weekly review engine triggered via authenticated scheduled webhooks (`/cron/weekly-review` with `X-Cron-Secret`).
 - **🛡️ Enterprise Privacy & Security**:
-  - Client-side PII scrubbing prior to multi-model deliberation.
+  - Server-side PII scrubbing immediately prior to outbound multi-model deliberation.
   - `HttpOnly`, `SameSite=Lax`, and `Secure` cookie session authentication with double-submit `X-CSRF-Token` headers on all mutations.
   - Strict Content Security Policy (CSP) and defense against clickjacking and MIME sniffing.
 - **📥 CSV Statement Import & Full Disaster Recovery**:
@@ -49,10 +49,10 @@ graph TD
         Round2 --> Tally["Confidence-Weighted Tally & Guardrail Verification"]
         
         Round1 -.-> Gemini["Google Gemini 2.5"]
-        Round1 -.-> Groq["Groq Llama 3.3"]
-        Round1 -.-> Cerebras["Cerebras Wafer-Scale"]
+        Round1 -.-> Groq["Groq GPT-OSS 120B"]
         Round1 -.-> Mistral["Mistral AI"]
-        Round1 -.-> OpenRouter["DeepSeek / Qwen"]
+        Round1 -.-> OpenRouter["OpenRouter Qwen 2.5"]
+        Round1 -.-> Cerebras["Cerebras (Optional/Trial)"]
         Round1 -.-> Ollama["Local Ollama"]
     end
 

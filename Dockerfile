@@ -24,14 +24,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install system dependencies
+# Install minimal curl for health checks (no gcc or build tools in final image)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    gcc \
-    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python requirements
+# Install Python requirements (uses psycopg2-binary, pre-compiled wheels)
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
@@ -40,6 +38,12 @@ COPY backend/ ./backend/
 
 # Copy Frontend Build Output from Stage 1 into frontend/dist
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+# Create non-root system user and assign permissions
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 # Expose default port
 EXPOSE 8000

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { Lock, Mail, KeyRound, Globe, ArrowRight } from "lucide-react";
+import { Lock, Mail, KeyRound, Globe, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 interface RegisterPageProps {
   onNavigateToLogin: () => void;
@@ -10,6 +10,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateToLogin })
   const { register } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [currency, setCurrency] = useState("GHS");
   const [loading, setLoading] = useState(false);
@@ -87,16 +88,36 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateToLogin })
             <label className="input-label">Password (Min 8 chars, max 72 bytes)</label>
             <div style={{ position: "relative" }}>
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 minLength={8}
                 className="input-field"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{ paddingLeft: "38px" }}
+                style={{ paddingLeft: "38px", paddingRight: "40px" }}
               />
               <Lock size={16} style={{ position: "absolute", left: "12px", top: "14px", color: "var(--text-muted)" }} />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "12px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  padding: "2px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
 

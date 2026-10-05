@@ -16,8 +16,9 @@ from app.core.csp import SecurityHeadersMiddleware
 from app.core.limiter import limiter
 from app.db.init_db import init_db
 from app.api.api_router import api_v1_router
+from app.api.api_router import api_v1_router
 from app.api.v1.health import router as health_router
-from app.api.v1.internal import router as internal_router
+from app.api.v1.cron import router as cron_router
 
 
 @asynccontextmanager
@@ -56,7 +57,7 @@ app.add_middleware(
 # 3. Mount API Routers
 app.include_router(health_router)  # /health root level
 app.include_router(api_v1_router)   # /api/v1/*
-app.include_router(internal_router) # /internal/*
+app.include_router(cron_router)     # /cron/*
 
 # 4. Single-Origin Static Files & SPA Fallback Handler
 # Look for frontend dist in both relative paths
@@ -79,8 +80,8 @@ if frontend_dist:
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str, request: Request):
-        # Allow API and docs routes to bypass
-        if full_path.startswith(("api/", "health", "internal/", "docs", "openapi.json")):
+        # Allow API, health, cron, and docs routes to bypass
+        if full_path.startswith(("api/", "health", "cron/", "docs", "openapi.json")):
             return None
         file_path = os.path.join(frontend_dist, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):

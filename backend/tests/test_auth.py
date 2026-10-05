@@ -2,17 +2,22 @@
 Unit and integration tests for Auth, Security, Keep-Alive, and Rate Limiting.
 """
 import pytest
-from app.config import settings
+from app.config import Settings, settings
 from app.models.category import Category
 from tests.conftest import TestingSessionLocal
 
 
-def test_health_check(client):
+def test_health_check_get_and_head(client, capsys):
+    # Test GET
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
     assert "MoneyCouncil" in data["app"]
+
+    # Test HEAD
+    head_response = client.head("/health")
+    assert head_response.status_code == 200
 
 
 def test_security_headers_present(client):
@@ -53,6 +58,20 @@ def test_first_user_registration_and_login(client):
         json={"email": "second@example.com", "password": "AnotherPassword123!"},
     )
     assert second_reg.status_code == 403
+
+    # Subsequent registration with empty string invite code must fail with 403
+    empty_code_reg = client.post(
+        "/api/v1/auth/register",
+        json={"email": "third@example.com", "password": "AnotherPassword123!", "invite_code": ""},
+    )
+    assert empty_code_reg.status_code == 403
+
+    # Subsequent registration with whitespace invite code must fail with 403
+    whitespace_reg = client.post(
+        "/api/v1/auth/register",
+        json={"email": "fourth@example.com", "password": "AnotherPassword123!", "invite_code": "   "},
+    )
+    assert whitespace_reg.status_code == 403
 
     # Subsequent registration WITH valid invite code succeeds with 201
     valid_second = client.post(
@@ -112,15 +131,70 @@ def test_first_user_registration_and_login(client):
     assert long_reg.status_code == 422  # Unprocessable Entity validation error
 
 
-def test_internal_cron_security(client):
+def test_unconfigured_invite_code_blocks_registration(client):
+    # Register first user
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": "first@example.com", "password": "SecurePassword123!"},
+    )
+    original_invite = settings.INVITE_CODE
+    try:
+        # If INVITE_CODE is blank/empty, no second user can register
+        settings.INVITE_CODE = ""
+        res = client.post(
+            "/api/v1/auth/register",
+            json={"email": "blocked@example.com", "password": "SecurePassword123!", "invite_code": ""},
+        )
+        assert res.status_code == 403
+    finally:
+        settings.INVITE_CODE = original_invite
+
+
+def test_cron_weekly_review_security(client):
     # Call without secret fails
-    res_no_secret = client.post("/internal/weekly-review")
+    res_no_secret = client.post("/cron/weekly-review")
     assert res_no_secret.status_code == 403
+
+    # Call with wrong secret fails
+    res_bad_secret = client.post(
+        "/cron/weekly-review",
+        headers={"X-Cron-Secret": "wrong_cron_secret"},
+    )
+    assert res_bad_secret.status_code == 403
 
     # Call with correct secret succeeds
     res_with_secret = client.post(
-        "/internal/weekly-review",
-        headers={"X-Internal-Secret": settings.INTERNAL_CRON_SECRET},
+        "/cron/weekly-review",
+        headers={"X-Cron-Secret": settings.CRON_SECRET},
     )
     assert res_with_secret.status_code == 200
     assert res_with_secret.json()["status"] == "success"
+
+
+def test_production_config_validation():
+    # In production, weak or short SECRET_KEY must raise ValueError
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        cfg = Settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="short",
+            CRON_SECRET="f9a8e7d6c5b4a39281701234567890abcdef1234567890abcdef1234567890ab",
+        )
+        cfg.validate_production_readiness()
+
+    # In production, placeholder SECRET_KEY must raise ValueError
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        cfg = Settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="insecure_dev_secret_key_please_change_in_production_992837482",
+            CRON_SECRET="f9a8e7d6c5b4a39281701234567890abcdef1234567890abcdef1234567890ab",
+        )
+        cfg.validate_production_readiness()
+
+    # In production, placeholder CRON_SECRET must raise ValueError
+    with pytest.raises(ValueError, match="CRON_SECRET"):
+        cfg = Settings(
+            ENVIRONMENT="production",
+            SECRET_KEY="f9a8e7d6c5b4a39281701234567890abcdef1234567890abcdef1234567890ab",
+            CRON_SECRET="dev_cron_secret_123_change_in_production",
+        )
+        cfg.validate_production_readiness()

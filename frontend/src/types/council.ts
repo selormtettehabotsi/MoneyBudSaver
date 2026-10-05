@@ -4,7 +4,7 @@ export interface IndividualVote {
   provider_name: string;
   model_id: string;
   model_family: string;
-  status: "success" | "failed" | "timeout" | "rate_limited" | "skipped";
+  status: "success" | "failed" | "timeout" | "rate_limited" | "skipped" | "unavailable" | "missing_key" | "not_configured";
   verdict: "approve" | "reject" | "approve_with_conditions" | null;
   confidence: number | null;
   reasoning: string | null;

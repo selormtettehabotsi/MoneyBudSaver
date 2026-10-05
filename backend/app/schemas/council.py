@@ -19,7 +19,7 @@ class IndividualVote(BaseModel):
     provider_name: str
     model_id: str
     model_family: str
-    status: Literal["success", "failed", "timeout", "rate_limited", "skipped"]
+    status: Literal["success", "failed", "timeout", "rate_limited", "skipped", "unavailable"]
     verdict: Optional[Literal["approve", "reject", "approve_with_conditions"]] = None
     confidence: Optional[int] = Field(None, ge=0, le=100)
     reasoning: Optional[str] = None

@@ -31,6 +31,12 @@ dist/
 frontend/dist/
 build/
 
+# Backups & exported data
+*backup*.json
+*.backup.json
+*backup*.csv
+*.csv
+
 # OS files
 .DS_Store
 Thumbs.db

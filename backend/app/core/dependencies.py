@@ -78,9 +78,9 @@ async def verify_csrf(
     Validates cryptographic signature of the CSRF token.
     """
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        # Exempt login, register, and internal cron endpoints
+        # Exempt login, register, health, and cron endpoints
         path = request.url.path
-        if path.endswith("/auth/login") or path.endswith("/auth/register") or "/internal/" in path:
+        if path.endswith("/auth/login") or path.endswith("/auth/register") or "/cron/" in path or path.startswith("/health"):
             return True
 
         if not x_csrf_token:

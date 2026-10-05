@@ -33,22 +33,31 @@ export const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
       <div
         className="modal-content"
         style={{ maxWidth }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile Drag Pill Handle */}
+        <div className="modal-drag-handle" />
+
         <div className="flex items-center justify-between" style={{ marginBottom: "16px" }}>
-          <h2>{title}</h2>
+          <h2 style={{ fontSize: "18px", fontWeight: 700 }}>{title}</h2>
           <button
             onClick={onClose}
+            aria-label="Close modal"
             style={{
               background: "transparent",
               border: "none",
               color: "var(--text-secondary)",
               cursor: "pointer",
-              padding: "4px",
+              padding: "8px",
+              minWidth: "44px",
+              minHeight: "44px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               borderRadius: "var(--radius-sm)",
             }}
           >

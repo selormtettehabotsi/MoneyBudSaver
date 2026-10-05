@@ -13,7 +13,7 @@ services:
         value: hosted
       - key: SECRET_KEY
         generateValue: true
-      - key: INTERNAL_CRON_SECRET
+      - key: CRON_SECRET
         generateValue: true
       - key: DATABASE_URL
         sync: false # Paste Neon.tech or Supabase PostgreSQL connection string here
@@ -21,11 +21,7 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      - key: CEREBRAS_API_KEY
-        sync: false
       - key: MISTRAL_API_KEY
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: CORS_ORIGINS
-        value: "*"

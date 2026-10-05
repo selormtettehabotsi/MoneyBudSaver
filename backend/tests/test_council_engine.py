@@ -167,7 +167,22 @@ def test_council_api_endpoints_and_decision_flow(make_auth_client):
     providers = prov_res.json()
     assert len(providers) >= 5
 
-    # 2. Ask the Council (using simulated/mocked deliberation)
+    # 2. Preview Council Prompt (server-side PII scrubbing and deterministic context)
+    preview_res = client.post(
+        "/api/v1/council/preview",
+        json={
+            "question": "Should I buy a new Mac for GHS 5,000 using my card 4111-2222-3333-4444?",
+            "decision_type": "purchase",
+            "candidate_amount": "5000.00",
+        },
+    )
+    assert preview_res.status_code == 200
+    preview_data = preview_res.json()
+    assert "4111-2222-3333-4444" not in preview_data["anonymized_prompt"]
+    assert "[CARD_REDACTED]" in preview_data["anonymized_prompt"]
+    assert "FINANCIAL FACTS & RATIOS" in preview_data["anonymized_prompt"]
+
+    # 3. Ask the Council (using simulated/mocked deliberation)
     ask_res = client.post(
         "/api/v1/council/ask",
         json={
@@ -185,7 +200,7 @@ def test_council_api_endpoints_and_decision_flow(make_auth_client):
     assert "final_tally" in decision
     decision_id = decision["id"]
 
-    # 3. User records final say: [ ACCEPTED ]
+    # 4. User records final say: [ ACCEPTED ]
     decide_res = client.post(
         f"/api/v1/council/decide/{decision_id}",
         json={
@@ -197,9 +212,131 @@ def test_council_api_endpoints_and_decision_flow(make_auth_client):
     assert decide_res.json()["user_verdict"] == "accepted"
     assert "supplier discount" in decide_res.json()["user_modifications"]
 
-    # 4. Check history
+    # 5. Check history
     hist_res = client.get("/api/v1/council/history")
     assert hist_res.status_code == 200
     history = hist_res.json()
     assert len(history) == 1
     assert history[0]["id"] == decision_id
+
+
+def test_outbound_payload_privacy_guarantee(make_auth_client):
+    """
+    Guarantees that raw transaction descriptions, merchant names, and private account numbers
+    are NEVER included in the outbound prompt sent to AI models.
+    """
+    client, user = make_auth_client("privacy_audit@example.com", "Password123!")
+
+    # Create transactions with private identifiers and merchant names
+    sensitive_descriptions = [
+        "Payment to Dr. Jane Doe Specialist Clinic",
+        "Transfer to Secret Swiss Bank ACCT-9988776655",
+        "Pharmacy Rx Order #991823",
+    ]
+    for desc in sensitive_descriptions:
+        client.post(
+            "/api/v1/transactions",
+            json={
+                "amount": "150.00",
+                "type": "expense",
+                "date": "2026-10-01",
+                "description": desc,
+            },
+        )
+
+    # Preview prompt
+    preview_res = client.post(
+        "/api/v1/council/preview",
+        json={
+            "question": "Should I purchase dental equipment?",
+            "decision_type": "purchase",
+            "candidate_amount": "800.00",
+        },
+    )
+    assert preview_res.status_code == 200
+    prompt_text = preview_res.json()["anonymized_prompt"]
+
+    # Assert none of the sensitive descriptions or account numbers leaked into the prompt
+    for desc in sensitive_descriptions:
+        assert desc not in prompt_text, f"Private transaction description leaked: {desc}"
+    assert "Jane Doe" not in prompt_text
+    assert "9988776655" not in prompt_text
+    assert "ACCT-9988776655" not in prompt_text
+
+
+def test_default_model_ids_and_families():
+    """Verifies that default model IDs are set to non-Llama gpt-oss for Groq and Qwen for OpenRouter."""
+    from app.config import settings
+    assert settings.GROQ_MODEL_ID == "openai/gpt-oss-120b"
+    assert settings.OPENROUTER_MODEL_ID == "qwen/qwen-2.5-72b-instruct:free"
+
+
+def test_model_family_diversity():
+    """Verifies that the 4 default free providers map to 4 distinct model families."""
+    from app.services.council.adapters_factory import get_configured_providers
+    from app.config import settings
+
+    # Simulate all 4 free provider keys present
+    orig_gemini = settings.GEMINI_API_KEY
+    orig_groq = settings.GROQ_API_KEY
+    orig_mistral = settings.MISTRAL_API_KEY
+    orig_openrouter = settings.OPENROUTER_API_KEY
+    orig_cerebras = settings.CEREBRAS_API_KEY
+
+    try:
+        settings.GEMINI_API_KEY = "test_gemini"
+        settings.GROQ_API_KEY = "test_groq"
+        settings.MISTRAL_API_KEY = "test_mistral"
+        settings.OPENROUTER_API_KEY = "test_openrouter"
+        settings.CEREBRAS_API_KEY = "test_cerebras"
+
+        # Default settings: Cerebras must be off by default
+        adapters = get_configured_providers()
+        families = {a.model_family for a in adapters}
+        
+        # 4 distinct families without Cerebras
+        assert len(adapters) == 4
+        assert len(families) == 4
+        assert "Google Gemini Family" in families
+        assert "OpenAI / GPT-OSS Family" in families
+        assert "Mistral Family" in families
+        assert "Qwen Family" in families
+        assert not any(a.name == "cerebras" for a in adapters)
+
+        # Enabling Cerebras explicitly should add Meta Llama Family
+        adapters_with_cerebras = get_configured_providers(
+            user_settings={"providers_enabled": {"cerebras": True}}
+        )
+        assert any(a.name == "cerebras" for a in adapters_with_cerebras)
+
+    finally:
+        settings.GEMINI_API_KEY = orig_gemini
+        settings.GROQ_API_KEY = orig_groq
+        settings.MISTRAL_API_KEY = orig_mistral
+        settings.OPENROUTER_API_KEY = orig_openrouter
+        settings.CEREBRAS_API_KEY = orig_cerebras
+
+
+def test_council_deliberation_with_subset_of_keys(make_auth_client):
+    """
+    Verifies that the Council runs normally with any subset of keys (e.g., 0, 1, or 2 keys),
+    and unconfigured keys never throw an error.
+    """
+    client, user = make_auth_client("subset_user@example.com", "Password123!")
+
+    # Ask Council with no mock providers (simulates 0 keys configured)
+    res = client.post(
+        "/api/v1/council/ask",
+        json={
+            "question": "Should I invest in emergency bonds?",
+            "decision_type": "investment",
+            "candidate_amount": "1000.00",
+            "enable_debate": True,
+            "local_only_mode": False,
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "final_tally" in data
+    assert data["final_tally"]["final_verdict"] in ("split_decision", "approve", "reject")
+

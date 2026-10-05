@@ -67,10 +67,21 @@ async def register(payload: UserRegister, response: Response, db: Session = Depe
     user_count = db.query(User).count()
 
     if user_count > 0:
-        if not settings.INVITE_CODE or payload.invite_code != settings.INVITE_CODE:
+        # Subsequent registrations require a valid, non-blank INVITE_CODE configured in settings
+        configured_invite = settings.INVITE_CODE.strip() if settings.INVITE_CODE else ""
+        submitted_invite = payload.invite_code.strip() if payload.invite_code else ""
+
+        if not configured_invite or not submitted_invite:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is restricted. A valid invite code is required.",
+                detail="Registration is restricted. A valid non-blank invite code is required.",
+            )
+
+        import secrets
+        if not secrets.compare_digest(submitted_invite, configured_invite):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is restricted. Invalid invite code.",
             )
 
     # Check if email is already taken
@@ -92,7 +103,7 @@ async def register(payload: UserRegister, response: Response, db: Session = Depe
             "providers_enabled": {
                 "gemini": bool(settings.GEMINI_API_KEY),
                 "groq": bool(settings.GROQ_API_KEY),
-                "cerebras": bool(settings.CEREBRAS_API_KEY),
+                "cerebras": False,  # Off by default (optional / paid or trial only)
                 "mistral": bool(settings.MISTRAL_API_KEY),
                 "openrouter": bool(settings.OPENROUTER_API_KEY),
                 "ollama": not settings.is_hosted,

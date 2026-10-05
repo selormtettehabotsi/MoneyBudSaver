@@ -4,7 +4,7 @@ Reads from environment variables and .env file.
 Fails fast if production secrets are insecure or missing.
 """
 import os
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
@@ -24,25 +24,36 @@ class Settings(BaseSettings):
     CSRF_COOKIE_NAME: str = "mc_csrf"
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:8000", "http://127.0.0.1:5173", "http://127.0.0.1:8000"]
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://localhost:8000", "http://127.0.0.1:5173", "http://127.0.0.1:8000"]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v):
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        return [str(o) for o in parsed if str(o) != "*"]
+                except Exception:
+                    pass
+            origins = [i.strip() for i in v.split(",") if i.strip()]
+            return [o for o in origins if o != "*"]
+        if isinstance(v, list):
+            return [str(o) for o in v if str(o) != "*"]
         return v
 
     # Database
     DATABASE_URL: str = "sqlite:///./moneycouncil.db"
 
-    # Internal Cron Endpoint Secret
-    INTERNAL_CRON_SECRET: str = "dev_internal_cron_secret_123"
+    # Cron Endpoint Secret (for weekly review webhook)
+    CRON_SECRET: str = "dev_cron_secret_123_change_in_production"
 
     # AI Provider Engine Configuration
     AI_PROVIDER_TIMEOUT_SECONDS: int = 25
 
-    # Financial Guardrail Defaults
+    # Financial Guardrail Defaults (Single Source of Truth)
     DEFAULT_MAX_DTI_RATIO: float = 40.0
     DEFAULT_MIN_RUNWAY_MONTHS: float = 3.0
     DEFAULT_CURRENCY: str = "GHS"
@@ -52,7 +63,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL_ID: str = "gemini-2.5-flash"
 
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL_ID: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL_ID: str = "openai/gpt-oss-120b"
 
     CEREBRAS_API_KEY: Optional[str] = None
     CEREBRAS_MODEL_ID: str = "llama3.3-70b"
@@ -61,7 +72,7 @@ class Settings(BaseSettings):
     MISTRAL_MODEL_ID: str = "mistral-small-latest"
 
     OPENROUTER_API_KEY: Optional[str] = None
-    OPENROUTER_MODEL_ID: str = "deepseek/deepseek-chat"
+    OPENROUTER_MODEL_ID: str = "qwen/qwen-2.5-72b-instruct:free"
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_ID: str = "llama3.2"
@@ -85,10 +96,19 @@ class Settings(BaseSettings):
     def validate_production_readiness(self):
         """Fails fast on startup if production environment lacks secure secrets."""
         if self.ENVIRONMENT.lower() == "production":
-            if "insecure_dev_secret" in self.SECRET_KEY or len(self.SECRET_KEY) < 32:
-                raise ValueError("FATAL: In production, SECRET_KEY must be a cryptographically secure random string >= 32 chars.")
-            if self.INTERNAL_CRON_SECRET == "dev_internal_cron_secret_123":
-                raise ValueError("FATAL: In production, INTERNAL_CRON_SECRET must be set to a secure unique secret.")
+            insecure_placeholders = [
+                "insecure_dev_secret",
+                "change_this",
+                "your-secret-key",
+                "secret_key_please_change",
+                "dev_cron_secret",
+                "dev_internal_cron_secret",
+                "placeholder",
+            ]
+            if not self.SECRET_KEY or len(self.SECRET_KEY) < 32 or any(p in self.SECRET_KEY.lower() for p in insecure_placeholders):
+                raise ValueError("FATAL: In production, SECRET_KEY must be a cryptographically secure random string >= 32 chars without placeholders.")
+            if not self.CRON_SECRET or len(self.CRON_SECRET) < 32 or any(p in self.CRON_SECRET.lower() for p in insecure_placeholders):
+                raise ValueError("FATAL: In production, CRON_SECRET must be set to a secure unique secret >= 32 chars without placeholders.")
 
 
 settings = Settings()

@@ -116,11 +116,11 @@ export const SettingsPage: React.FC = () => {
   };
 
   const providerFamilies = [
-    { name: "Google Gemini", family: "Gemini Family", defaultModel: "gemini-2.5-flash", icon: <Sparkles size={16} />, status: "Active (Free API)" },
-    { name: "Groq Llama", family: "Meta Llama Family", defaultModel: "llama-3.3-70b-versatile", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free)" },
-    { name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Active (Wafer-Scale Inference)" },
+    { name: "Google Gemini", family: "Google Gemini Family", defaultModel: "gemini-2.5-flash", icon: <Sparkles size={16} />, status: "Active (Free Tier)" },
+    { name: "Groq GPT-OSS", family: "OpenAI / GPT-OSS Family", defaultModel: "openai/gpt-oss-120b", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free Tier)" },
     { name: "Mistral AI", family: "Mistral Family", defaultModel: "mistral-small-latest", icon: <Shield size={16} />, status: "Active (European Free Tier)" },
-    { name: "OpenRouter DeepSeek", family: "DeepSeek / Qwen Family", defaultModel: "deepseek/deepseek-chat", icon: <Globe size={16} />, status: "Active (Free Models)" },
+    { name: "OpenRouter Qwen", family: "Qwen Family", defaultModel: "qwen/qwen-2.5-72b-instruct:free", icon: <Globe size={16} />, status: "Active (Free Tier)" },
+    { name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Optional (Paid / Trial Only)" },
     { name: "Ollama (Local Offline)", family: "Self-Hosted Private", defaultModel: "llama3.2", icon: <Server size={16} />, status: isHosted ? "Disabled in Hosted Mode" : "Local / Offline Only" },
   ];
 

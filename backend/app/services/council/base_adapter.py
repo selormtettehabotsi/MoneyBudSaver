@@ -115,6 +115,26 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                         error_message="Provider rate limit reached (HTTP 429).",
                     )
 
+                if res.status_code == 402:
+                    return IndividualVote(
+                        provider_name=self.name,
+                        model_id=self.model_id,
+                        model_family=self.model_family,
+                        status="unavailable",
+                        round_number=round_number,
+                        error_message="Provider credits exhausted / payment required (HTTP 402). Model unavailable.",
+                    )
+
+                if res.status_code == 404:
+                    return IndividualVote(
+                        provider_name=self.name,
+                        model_id=self.model_id,
+                        model_family=self.model_family,
+                        status="unavailable",
+                        round_number=round_number,
+                        error_message=f"Model ID '{self.model_id}' not found or deprecated by provider (HTTP 404). Model unavailable.",
+                    )
+
                 if res.status_code != 200:
                     return IndividualVote(
                         provider_name=self.name,

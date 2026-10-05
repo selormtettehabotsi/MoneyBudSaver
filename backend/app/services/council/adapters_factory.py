@@ -48,25 +48,25 @@ def get_configured_providers(
             )
         )
 
-    # 2. Meta Llama Family via Groq
+    # 2. OpenAI / GPT-OSS Family via Groq
     if providers_enabled.get("groq", True) and settings.GROQ_API_KEY:
         adapters.append(
             OpenAICompatibleAdapter(
                 name="groq",
-                display_name="Groq Llama",
-                model_family="Meta Llama Family",
+                display_name="Groq GPT-OSS",
+                model_family="OpenAI / GPT-OSS Family",
                 model_id=custom_models.get("groq", settings.GROQ_MODEL_ID),
                 base_url="https://api.groq.com/openai/v1",
                 api_key=settings.GROQ_API_KEY,
             )
         )
 
-    # 3. Meta Llama Family via Cerebras (High-throughput Wafer Scale)
-    if providers_enabled.get("cerebras", True) and settings.CEREBRAS_API_KEY:
+    # 3. Meta Llama Family via Cerebras (Optional: Paid or Trial Only, Off by Default)
+    if providers_enabled.get("cerebras", False) and settings.CEREBRAS_API_KEY:
         adapters.append(
             OpenAICompatibleAdapter(
                 name="cerebras",
-                display_name="Cerebras Llama",
+                display_name="Cerebras Llama (Paid/Trial)",
                 model_family="Meta Llama Family",
                 model_id=custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
                 base_url="https://api.cerebras.ai/v1",
@@ -87,13 +87,13 @@ def get_configured_providers(
             )
         )
 
-    # 5. DeepSeek / Qwen Family via OpenRouter Free Tier
+    # 5. Qwen Family via OpenRouter Free Tier
     if providers_enabled.get("openrouter", True) and settings.OPENROUTER_API_KEY:
         adapters.append(
             OpenAICompatibleAdapter(
                 name="openrouter",
-                display_name="OpenRouter DeepSeek/Qwen",
-                model_family="DeepSeek / Qwen Family",
+                display_name="OpenRouter Qwen",
+                model_family="Qwen Family",
                 model_id=custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID),
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.OPENROUTER_API_KEY,

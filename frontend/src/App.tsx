@@ -8,11 +8,11 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
-import { BudgetsPage } from "./pages/BudgetsPage";
-import { GoalsPage } from "./pages/GoalsPage";
-import { DebtsPage } from "./pages/DebtsPage";
+import { PlanPage } from "./pages/PlanPage";
 import { CouncilPage } from "./pages/CouncilPage";
+import { MorePage } from "./pages/MorePage";
 import { SuggestionsPage } from "./pages/SuggestionsPage";
+import { DataPage } from "./pages/DataPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
@@ -26,7 +26,7 @@ const AppContent: React.FC = () => {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -67,16 +67,22 @@ const AppContent: React.FC = () => {
         );
       case "transactions":
         return <TransactionsPage />;
-      case "budgets":
-        return <BudgetsPage />;
-      case "goals":
-        return <GoalsPage />;
-      case "debts":
-        return <DebtsPage />;
       case "council":
         return <CouncilPage initialQuestion={councilPrefill} key={councilPrefill} />;
+      case "plan":
+        return <PlanPage initialTab="budgets" />;
+      case "budgets":
+        return <PlanPage initialTab="budgets" />;
+      case "goals":
+        return <PlanPage initialTab="goals" />;
+      case "debts":
+        return <PlanPage initialTab="debts" />;
+      case "more":
+        return <MorePage onNavigate={setCurrentPage} />;
       case "suggestions":
         return <SuggestionsPage onNavigateToCouncil={navigateToCouncilWithQuery} />;
+      case "data":
+        return <DataPage />;
       case "settings":
         return <SettingsPage />;
       default:

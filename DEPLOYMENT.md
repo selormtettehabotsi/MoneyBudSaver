@@ -1,6 +1,6 @@
 # 🚀 MoneyCouncil — Zero-Cost Deployment & Remote Access Guide
 
-This guide walks you through deploying **MoneyCouncil** at **$0.00 / month forever** using free-tier cloud infrastructure, or self-hosting on your local PC / home server with secure remote phone access from anywhere in the world.
+This guide walks you through deploying **MoneyCouncil** using free-tier cloud infrastructure, or self-hosting on your local PC / home server with secure remote phone access from anywhere in the world.
 
 ---
 
@@ -9,14 +9,17 @@ This guide walks you through deploying **MoneyCouncil** at **$0.00 / month forev
 - **Single-Origin Deployment**: FastAPI statically serves the pre-compiled React 18 PWA frontend from `/frontend/dist`. No CORS friction, no split domains.
 - **Enterprise Cookie Security**: Uses `HttpOnly`, `SameSite=Lax`, and `Secure` (auto-enforced on HTTPS and hosted mode) cookies with double-submit `X-CSRF-Token` headers for all mutations.
 - **Database Flexibility**: Instant toggle between local zero-config **SQLite** (`sqlite:///./moneycouncil.db`) and cloud-scale **PostgreSQL** (Neon, Supabase) via the `DATABASE_URL` environment variable.
-- **Cold-Start Resilience**: Built-in exponential backoff in the frontend client handles free cloud spin-downs seamlessly with a warm-up banner.
-- **Ensemble Multi-AI Deliberation**: Pluggable provider adapters (Gemini, Groq, Cerebras, Mistral, OpenRouter, Ollama) with client-side PII scrubbing and automatic JSON repair.
+- **Keep-Alive & Cold-Start Resilience**: Lightweight `/health` endpoint (0 database queries) responds to `GET` and `HEAD` for uptime monitoring, with exponential backoff and warm-up banners in the frontend.
+- **Ensemble Multi-AI Deliberation**: Pluggable provider adapters (Gemini, Groq, Cerebras, Mistral, OpenRouter, Ollama) with server-side PII scrubbing and automatic JSON repair.
 
 ---
 
 ## 🌐 Option 1: Free Cloud Deployment (Render + Neon Postgres)
 
-Follow these steps to deploy a live, 24/7 web app accessible from your phone, tablet, and computer.
+Follow these steps to deploy a live web app accessible from your phone, tablet, and computer.
+
+> [!NOTE]
+> Free-tier hosts like Render spin down web services after 15 minutes of inactivity, and free database providers (Neon/Supabase) may suspend compute when idle. Setting up a 5-minute keep-alive ping prevents sleep during active usage.
 
 ### Step 1: Create a Free PostgreSQL Database on Neon
 1. Go to [Neon.tech](https://neon.tech) and sign up for a free account.
@@ -29,17 +32,18 @@ Follow these steps to deploy a live, 24/7 web app accessible from your phone, ta
 ---
 
 ### Step 2: Obtain Free Multi-AI Provider API Keys
-MoneyCouncil uses distinct free-tier AI providers to ensure unbiased multi-model council consensus:
+MoneyCouncil uses 4 distinct free-tier AI providers to ensure unbiased multi-model council consensus:
 
-| Provider | Free Tier Link | Default Recommended Model |
-| :--- | :--- | :--- |
-| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | `gemini-2.5-flash` |
-| **Groq Llama** | [console.groq.com](https://console.groq.com/) | `llama-3.3-70b-versatile` |
-| **Cerebras Llama** | [cloud.cerebras.ai](https://cloud.cerebras.ai/) | `llama3.3-70b` |
-| **Mistral AI** | [console.mistral.ai](https://console.mistral.ai/) | `mistral-small-latest` |
-| **OpenRouter** | [openrouter.ai](https://openrouter.ai/) | `deepseek/deepseek-chat` |
+| Provider | Free Tier Link | Model Family | Default Recommended Model |
+| :--- | :--- | :--- | :--- |
+| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | Google Gemini | `gemini-2.5-flash` |
+| **Groq** | [console.groq.com](https://console.groq.com/) | OpenAI / GPT-OSS | `openai/gpt-oss-120b` |
+| **Mistral AI** | [console.mistral.ai](https://console.mistral.ai/) | Mistral | `mistral-small-latest` |
+| **OpenRouter** | [openrouter.ai](https://openrouter.ai/) | Qwen | `qwen/qwen-2.5-72b-instruct:free` |
 
-*(You can configure 1, 2, or all 5 keys. The Council dynamically activates all available providers!)*
+*(Optional: Cerebras is also supported as an optional paid/trial provider `llama3.3-70b` at [cloud.cerebras.ai](https://cloud.cerebras.ai/)).*
+
+*(You can configure any subset of keys — 1, 2, 3, or all 4. The Council runs normally with any subset of keys, showing unconfigured members as "not configured" rather than throwing an error!)*
 
 ---
 
@@ -51,35 +55,58 @@ MoneyCouncil uses distinct free-tier AI providers to ensure unbiased multi-model
    - **Environment**: `Docker`
    - **Dockerfile Path**: `./Dockerfile`
    - **Instance Type**: `Free`
-5. In the **Environment Variables** section, add:
+   - **Health Check Path**: `/health`
+5. Generate strong 64-character hex secrets on your local machine using Python:
+   ```bash
+   python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+6. In the **Environment Variables** section, add:
    ```ini
    ENVIRONMENT=production
    DEPLOYMENT_MODE=hosted
-   SECRET_KEY=generate_a_random_32_character_string_here_123456
-   INTERNAL_CRON_SECRET=generate_a_secret_for_weekly_reviews_123456
+   SECRET_KEY=<your_generated_64_hex_secret>
+   CRON_SECRET=<your_generated_64_hex_cron_secret>
    DATABASE_URL=postgresql://username:password@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
    GEMINI_API_KEY=your_gemini_api_key_here
    GROQ_API_KEY=your_groq_api_key_here
-   CEREBRAS_API_KEY=your_cerebras_api_key_here
    MISTRAL_API_KEY=your_mistral_api_key_here
    OPENROUTER_API_KEY=your_openrouter_api_key_here
+   # Optional Paid / Trial: CEREBRAS_API_KEY=your_cerebras_key
    ```
-6. Click **Create Web Service**. Render will build the React PWA and deploy the FastAPI container.
+7. Click **Create Web Service**. Render will build the React PWA and deploy the FastAPI container.
 
 ---
 
 ### Step 4: Keep-Alive & Weekly Financial Review Automation
-Render's free tier spins down after 15 minutes of inactivity. You can use free scheduled webhooks to keep it responsive and trigger automatic weekly financial audits:
 
-1. Sign up for a free account on [UptimeRobot](https://uptimerobot.com) or [Cron-Job.org](https://cron-job.org).
-2. **Ping 1 (Keep-Alive)**:
-   - **URL**: `https://your-app.onrender.com/health`
-   - **Interval**: Every 5 or 10 minutes.
-3. **Ping 2 (Automated Weekly Financial Review)**:
-   - **URL**: `https://your-app.onrender.com/internal/weekly-review`
-   - **HTTP Method**: `POST`
-   - **HTTP Header**: `X-Cron-Secret: <your_INTERNAL_CRON_SECRET>`
-   - **Schedule**: Every Sunday at 08:00 AM UTC.
+Free Render instances spin down after 15 minutes of inactivity. Use an external ping monitor to prevent sleeping and schedule automated weekly reviews.
+
+#### 1. Keep-Alive Ping (Every 5 minutes)
+- **Service**: [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org)
+- **URL**: `https://your-app.onrender.com/health`
+- **HTTP Method**: `GET` (or `HEAD`)
+- **Interval**: Every 5 minutes
+- **Expected Status**: `200 OK`
+- **Zero DB Load**: `/health` accesses no database and is exempt from rate limiting.
+
+> [!TIP]
+> **Backup Option (Cloudflare Worker Cron Trigger)**: You can also deploy a free 3-line Cloudflare Worker on a cron schedule (`*/5 * * * *`) that executes `fetch("https://your-app.onrender.com/health")`.
+
+#### 2. Automated Weekly Financial Review (Every Sunday)
+- **Service**: [cron-job.org](https://cron-job.org)
+- **URL**: `https://your-app.onrender.com/cron/weekly-review`
+- **HTTP Method**: `POST`
+- **Headers**:
+  - `X-Cron-Secret: <your_CRON_SECRET>`
+- **Schedule**: Weekly (e.g. Every Sunday at 08:00 UTC)
+
+#### 3. Verifying Pings in Host Logs
+To confirm pings are reaching your app:
+1. Open Render or Fly.io dashboard → **Logs**.
+2. Look for lines logged by `/health`:
+   ```
+   [2026-10-05T20:30:00.000000+00:00] HEALTH_CHECK method=GET ip=54.x.y.z ua=UptimeRobot/2.0
+   ```
 
 ---
 
@@ -123,18 +150,31 @@ graph LR
 
 ## 📱 Installing the PWA on iPhone & Android
 
-MoneyCouncil is a Progressive Web Application (PWA). Once you visit your deployed or tunneled URL:
+MoneyCouncil is an installable Progressive Web Application (PWA). Once you visit your deployed or tunneled URL:
 - **On iPhone (Safari)**: Tap the **Share** button → Tap **"Add to Home Screen"**.
 - **On Android (Chrome)**: Tap the **Three Dots Menu** → Tap **"Install App"** or **"Add to Home screen"**.
 
-The app launches full-screen without browser address bars, with offline caching and native app behavior!
+The app launches full-screen with native 100dvh safe-area support, touch gestures, and offline caching.
 
 ---
 
 ## 🔒 Security Best Practices Checklist
 
-- [x] **Change Production Secrets**: Never deploy with the default `SECRET_KEY` or `INTERNAL_CRON_SECRET`.
+- [x] **Change Production Secrets**: Never deploy with the default `SECRET_KEY` or `CRON_SECRET`.
 - [x] **Secure Cookies**: Automatically enforced on HTTPS domains and `DEPLOYMENT_MODE=hosted`.
 - [x] **CSRF Protection**: All mutation endpoints (`POST`, `PUT`, `DELETE`) require the `X-CSRF-Token` header.
-- [x] **PII Anonymization**: All transaction names and sensitive merchant details are anonymized client-side before submission to external AI providers.
-- [x] **Full Backups**: Download full database snapshots (`.json`) periodically from **Settings & Data Management** for disaster recovery.
+- [x] **Server-Side PII Scrubbing**: All transaction descriptions and sensitive merchant details are anonymized on the server immediately before outbound provider dispatch.
+- [x] **Full Backups**: Download portable database snapshots (`.json`) periodically from **Data & Backups** for disaster recovery.
+
+---
+
+## 🩺 Troubleshooting Checklist
+
+| Issue | Likely Cause | Solution |
+| :--- | :--- | :--- |
+| **App sleeps despite monitor** | Wrong URL pinged (e.g., `/` instead of `/health`) or HTTP redirects | Set monitor URL directly to `https://your-app.onrender.com/health` (avoid trailing slash mismatches). |
+| **HEAD request returns 405** | Monitor uses `HEAD` instead of `GET` | MoneyCouncil `/health` explicitly supports both `GET` and `HEAD`. |
+| **Free host hours exhausted** | Host free monthly allowance reached (e.g., 750 hours/month) | Render provides 750 free instance hours/month for 1 service. Ensure you don't run duplicate unused free web services on the same account. |
+| **Neon database cold latency** | Neon free Postgres suspends compute after 5 minutes of zero queries | The frontend displays a temporary "Waking up database..." notice during the 1–3s compute resume. |
+| **403 on `/cron/weekly-review`** | Missing or incorrect `X-Cron-Secret` header | Verify that the header `X-Cron-Secret` in cron-job.org matches the `CRON_SECRET` environment variable exactly. |
+| **402 / 404 in Council Chamber** | Provider credit quota exhausted or model ID renamed | Check provider API key balance or change the model ID in **Settings & AI Models**. |

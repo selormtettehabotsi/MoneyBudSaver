@@ -16,6 +16,20 @@ export const councilApi = {
       body: JSON.stringify(data),
     }),
 
+  preview: (data: {
+    question: string;
+    decision_type?: string;
+    candidate_amount?: string | null;
+  }) =>
+    apiClient<{
+      sanitized_question: string;
+      anonymized_prompt: string;
+      financial_snapshot: Record<string, any>;
+    }>("/api/v1/council/preview", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getHistory: (limit: number = 20, offset: number = 0) =>
     apiClient<CouncilDecision[]>(`/api/v1/council/history?limit=${limit}&offset=${offset}`),
 

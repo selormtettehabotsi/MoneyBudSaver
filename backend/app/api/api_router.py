@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth,
     health,
-    internal,
+    cron,
     categories,
     transactions,
     budgets,
@@ -30,4 +30,4 @@ api_v1_router.include_router(council.router)
 api_v1_router.include_router(suggestions.router)
 api_v1_router.include_router(data.router)
 
-__all__ = ["api_v1_router", "health", "internal"]
+__all__ = ["api_v1_router", "health", "cron"]

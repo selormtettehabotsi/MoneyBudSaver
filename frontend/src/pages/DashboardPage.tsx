@@ -6,17 +6,28 @@ import { CashFlowChart } from "../components/dashboard/CashFlowChart";
 import { BudgetProgress } from "../components/dashboard/BudgetProgress";
 import { DebtTimeline } from "../components/dashboard/DebtTimeline";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
-import { PlusCircle, RefreshCw, Scale } from "lucide-react";
+import {
+  PlusCircle,
+  RefreshCw,
+  Scale,
+  ChevronDown,
+  ChevronUp,
+  BarChart2,
+} from "lucide-react";
 
 interface DashboardPageProps {
   onNavigate: (page: string) => void;
   onOpenNewTransaction: () => void;
 }
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpenNewTransaction }) => {
+export const DashboardPage: React.FC<DashboardPageProps> = ({
+  onNavigate,
+  onOpenNewTransaction,
+}) => {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState<boolean>(true);
 
   const loadData = async () => {
     setLoading(true);
@@ -33,11 +44,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
 
   useEffect(() => {
     loadData();
+
+    // Listen for custom event from QuickAddModal
+    const handleTxAdded = () => loadData();
+    window.addEventListener("mc_transaction_added", handleTxAdded);
+    return () => window.removeEventListener("mc_transaction_added", handleTxAdded);
   }, []);
 
   if (loading && !data) {
     return (
-      <div className="flex flex-col items-center justify-center" style={{ minHeight: "60vh", gap: "12px" }}>
+      <div
+        className="flex flex-col items-center justify-center"
+        style={{ minHeight: "60dvh", gap: "12px" }}
+      >
         <RefreshCw size={28} className="text-indigo-400" style={{ animation: "spin 1s linear infinite" }} />
         <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Loading financial dashboard...</span>
       </div>
@@ -48,7 +67,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     return (
       <div className="glass-panel" style={{ padding: "32px", textAlign: "center" }}>
         <p style={{ color: "var(--danger)", marginBottom: "16px" }}>{error || "Unable to load data."}</p>
-        <button className="btn btn-primary btn-sm" onClick={loadData}>
+        <button className="btn btn-primary btn-sm" onClick={loadData} style={{ minHeight: "44px" }}>
           <RefreshCw size={14} />
           <span>Try Again</span>
         </button>
@@ -57,28 +76,41 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   }
 
   return (
-    <div className="flex flex-col gap-6" style={{ width: "100%" }}>
+    <div className="flex flex-col gap-5" style={{ width: "100%", maxWidth: "100%" }}>
       {/* Top Header & Actions */}
       <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <h1 style={{ fontSize: "26px" }}>Financial Overview</h1>
+          <h1 style={{ fontSize: "24px" }}>Financial Overview</h1>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
             Real-time cash flow, runway, and council analytics
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button className="btn btn-secondary btn-sm" onClick={loadData} title="Refresh">
-            <RefreshCw size={15} />
+        <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+          <button
+            className="btn btn-secondary btn-sm flex items-center gap-1"
+            onClick={loadData}
+            title="Refresh"
+            style={{ minHeight: "38px" }}
+          >
+            <RefreshCw size={14} />
             <span>Refresh</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate("council")}>
-            <Scale size={15} style={{ color: "var(--accent-secondary)" }} />
+          <button
+            className="btn btn-secondary btn-sm flex items-center gap-1"
+            onClick={() => onNavigate("council")}
+            style={{ minHeight: "38px" }}
+          >
+            <Scale size={14} style={{ color: "var(--accent-secondary)" }} />
             <span>Ask Council</span>
           </button>
-          <button className="btn btn-primary btn-sm" onClick={onOpenNewTransaction}>
-            <PlusCircle size={15} />
-            <span>New Transaction</span>
+          <button
+            className="btn btn-primary btn-sm flex items-center gap-1"
+            onClick={onOpenNewTransaction}
+            style={{ minHeight: "38px" }}
+          >
+            <PlusCircle size={14} />
+            <span>New Txn</span>
           </button>
         </div>
       </div>
@@ -86,20 +118,45 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
       {/* Financial Advice Disclaimer */}
       <DisclaimerBanner />
 
-      {/* Top 4 Metric KPI Cards */}
+      {/* Top 4 Key Metric KPI Cards (Always visible first) */}
       <MetricCards data={data} />
 
-      {/* Grid: 6-Month Trend Chart & Top Category Spend */}
-      <div className="grid grid-cols-2 gap-6">
-        <CashFlowChart trendData={data.monthly_trend} />
-        <BudgetProgress breakdown={data.category_breakdown} onManageBudgets={() => onNavigate("budgets")} />
+      {/* Collapsible Toggle for Deep Charts on Mobile */}
+      <div className="flex items-center justify-between" style={{ marginTop: "4px" }}>
+        <div className="flex items-center gap-2">
+          <BarChart2 size={18} style={{ color: "var(--accent-primary)" }} />
+          <h3 style={{ fontSize: "16px", fontWeight: 700 }}>Trends, Budgets & Timeline</h3>
+        </div>
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="btn btn-sm btn-secondary flex items-center gap-1"
+          style={{ minHeight: "36px", fontSize: "12px" }}
+          aria-label="Toggle analytics charts"
+        >
+          <span>{showDetails ? "Hide Charts" : "Show Charts"}</span>
+          {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
 
-      {/* Hard Guardrails & Debt Timeline Panel */}
-      <DebtTimeline
-        guardrailWarnings={data.guardrail_warnings}
-        onAskCouncil={() => onNavigate("council")}
-      />
+      {/* Collapsible Analytics Section */}
+      {showDetails && (
+        <div className="flex flex-col gap-6" style={{ width: "100%" }}>
+          {/* Grid: 6-Month Trend Chart & Top Category Spend */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5" style={{ width: "100%" }}>
+            <CashFlowChart trendData={data.monthly_trend} />
+            <BudgetProgress
+              breakdown={data.category_breakdown}
+              onManageBudgets={() => onNavigate("budgets")}
+            />
+          </div>
+
+          {/* Hard Guardrails & Debt Timeline Panel */}
+          <DebtTimeline
+            guardrailWarnings={data.guardrail_warnings}
+            onAskCouncil={() => onNavigate("council")}
+          />
+        </div>
+      )}
     </div>
   );
 };

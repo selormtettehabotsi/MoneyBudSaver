@@ -76,6 +76,26 @@ class GeminiAdapter(BaseProviderAdapter):
                         error_message="Gemini free quota rate limit reached.",
                     )
 
+                if res.status_code == 402:
+                    return IndividualVote(
+                        provider_name=self.name,
+                        model_id=self.model_id,
+                        model_family=self.model_family,
+                        status="unavailable",
+                        round_number=round_number,
+                        error_message="Gemini billing/quota exhausted (HTTP 402). Model unavailable.",
+                    )
+
+                if res.status_code == 404:
+                    return IndividualVote(
+                        provider_name=self.name,
+                        model_id=self.model_id,
+                        model_family=self.model_family,
+                        status="unavailable",
+                        round_number=round_number,
+                        error_message=f"Gemini model '{self.model_id}' not found (HTTP 404). Model unavailable.",
+                    )
+
                 if res.status_code != 200:
                     return IndividualVote(
                         provider_name=self.name,
