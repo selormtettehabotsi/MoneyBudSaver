@@ -52,6 +52,11 @@ class Settings(BaseSettings):
 
     # AI Provider Engine Configuration
     AI_PROVIDER_TIMEOUT_SECONDS: int = 25
+    AI_PROVIDER_DEFAULT_TIMEOUT_SECONDS: int = 25
+    NVIDIA_PROVIDER_TIMEOUT_SECONDS: int = 90
+    COUNCIL_JOB_TIMEOUT_SECONDS: int = 300  # 5 minutes max lifetime (longer than 2 debate rounds * 90s)
+    COUNCIL_MIN_QUORUM_VOTES: int = 3
+    SHARED_KEY_STAGGER_INTERVAL_SECONDS: float = 1.5
 
     # Financial Guardrail Defaults (Single Source of Truth)
     DEFAULT_MAX_DTI_RATIO: float = 40.0

@@ -158,3 +158,22 @@ def test_full_json_backup_and_restore(make_auth_client, db_session: Session):
     assert restored_goal is not None
     assert restored_goal.title == "Emergency Reserve"
     assert restored_goal.current_amount == Decimal("4500.00")
+
+
+def test_deployment_documented_backup_path_returns_200(make_auth_client):
+    """
+    Validates that the exact backup route documented in DEPLOYMENT.md
+    (/api/v1/data/backup/json) returns HTTP 200 and a valid JSON backup payload
+    for an authenticated user.
+    """
+    auth_client, user_data = make_auth_client("doc_backup@example.com", "Password123!", "USD")
+    res = auth_client.get("/api/v1/data/backup/json")
+    assert res.status_code == 200
+    data = res.json()
+    assert "metadata" in data
+    assert data["metadata"]["app"] == "MoneyCouncil"
+    assert "categories" in data
+    assert "transactions" in data
+    assert "budgets" in data
+    assert "savings_goals" in data
+    assert "debts" in data

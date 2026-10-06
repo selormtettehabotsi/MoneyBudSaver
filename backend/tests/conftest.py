@@ -36,6 +36,10 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+# Ensure background tasks in council engine use the test database
+from app.services.council import engine as council_engine
+council_engine.SessionLocal = TestingSessionLocal
+
 
 @pytest.fixture(autouse=True)
 def init_test_db():

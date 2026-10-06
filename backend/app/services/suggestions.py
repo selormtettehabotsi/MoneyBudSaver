@@ -148,7 +148,9 @@ def generate_audit_suggestions(
     monthly_debt_service = Decimal(str(snapshot.get("total_monthly_debt_obligations", 0.0)))
     liquid_savings = Decimal(str(snapshot.get("total_liquid_savings", 0.0)))
     dti_ratio = Decimal(str(snapshot.get("current_dti_pct", 0.0)))
-    runway_months = Decimal(str(snapshot.get("current_runway_months", 0.0)))
+    has_sufficient = snapshot.get("has_sufficient_data", True)
+    raw_runway = snapshot.get("current_runway_months")
+    runway_months = Decimal(str(raw_runway)) if (has_sufficient and raw_runway is not None) else None
     currency_code = user.currency or "GHS"
 
     suggestions: List[SuggestionItem] = []
@@ -224,38 +226,39 @@ def generate_audit_suggestions(
             )
         )
 
-    if runway_months < Decimal("1.0"):
-        suggestions.append(
-            SuggestionItem(
-                category="savings_opportunity",
-                severity="critical",
-                title="Critically Low Emergency Runway",
-                description=f"Your liquid reserves ({currency_code} {liquid_savings:,.2f}) cover only {runway_months:.1f} months of expenses (minimum safe buffer is {min_runway_setting} months).",
-                actionable_step=f"Prioritize building an immediate 1-month emergency fund of {currency_code} {monthly_expenses:,.2f} before allocating funds elsewhere.",
+    if has_sufficient and runway_months is not None:
+        if runway_months < Decimal("1.0"):
+            suggestions.append(
+                SuggestionItem(
+                    category="savings_opportunity",
+                    severity="critical",
+                    title="Critically Low Emergency Runway",
+                    description=f"Your liquid reserves ({currency_code} {liquid_savings:,.2f}) cover only {runway_months:.1f} months of expenses (minimum safe buffer is {min_runway_setting} months).",
+                    actionable_step=f"Prioritize building an immediate 1-month emergency fund of {currency_code} {monthly_expenses:,.2f} before allocating funds elsewhere.",
+                )
             )
-        )
-    elif runway_months < min_runway_setting:
-        target_buffer = round_decimal(monthly_expenses * min_runway_setting)
-        shortfall = round_decimal(target_buffer - liquid_savings)
-        suggestions.append(
-            SuggestionItem(
-                category="savings_opportunity",
-                severity="warning",
-                title="Emergency Runway Below Target",
-                description=f"Current runway is {runway_months:.1f} months vs your configured target of {min_runway_setting:.0f} months.",
-                actionable_step=f"Deposit {currency_code} {shortfall:,.2f} across the next 3 months to reach full target buffer.",
+        elif runway_months < min_runway_setting:
+            target_buffer = round_decimal(monthly_expenses * min_runway_setting)
+            shortfall = round_decimal(target_buffer - liquid_savings)
+            suggestions.append(
+                SuggestionItem(
+                    category="savings_opportunity",
+                    severity="warning",
+                    title="Emergency Runway Below Target",
+                    description=f"Current runway is {runway_months:.1f} months vs your configured target of {min_runway_setting:.0f} months.",
+                    actionable_step=f"Deposit {currency_code} {shortfall:,.2f} across the next 3 months to reach full target buffer.",
+                )
             )
-        )
-    elif runway_months >= Decimal("6.0"):
-        suggestions.append(
-            SuggestionItem(
-                category="general",
-                severity="info",
-                title="Strong Emergency Reserve (6+ Months)",
-                description=f"Your runway of {runway_months:.1f} months ({currency_code} {liquid_savings:,.2f}) provides excellent financial security against income shocks.",
-                actionable_step="Surplus cash above 6 months can be redirected to high-interest debt acceleration or long-term growth.",
+        elif runway_months >= Decimal("6.0"):
+            suggestions.append(
+                SuggestionItem(
+                    category="general",
+                    severity="info",
+                    title="Strong Emergency Reserve (6+ Months)",
+                    description=f"Your runway of {runway_months:.1f} months ({currency_code} {liquid_savings:,.2f}) provides excellent financial security against income shocks.",
+                    actionable_step="Surplus cash above 6 months can be redirected to high-interest debt acceleration or long-term growth.",
+                )
             )
-        )
 
     # 4. Audit Debts & Loans
     debts = db.query(Debt).filter(Debt.user_id == user.id, Debt.remaining_balance > 0).all()
@@ -333,12 +336,13 @@ def generate_audit_suggestions(
 
     # 6. Default Encouragement if all is healthy
     if not suggestions:
+        runway_desc = f"runway is strong ({float(runway_months):.1f} months)" if runway_months is not None else "runway data is accumulating"
         suggestions.append(
             SuggestionItem(
                 category="general",
                 severity="info",
                 title="All Financial Indicators Healthy",
-                description=f"Budgets are within limits, runway is strong ({runway_months:.1f} months), and debt payments are under control.",
+                description=f"Budgets are within limits, {runway_desc}, and debt payments are under control.",
                 actionable_step="Maintain current habits and consider increasing allocations to long-term savings goals.",
             )
         )
@@ -359,7 +363,8 @@ def generate_audit_suggestions(
         "net_cashflow": float(net_cashflow),
         "liquid_savings": float(liquid_savings),
         "dti_ratio": float(dti_ratio),
-        "runway_months": float(runway_months),
+        "runway_months": float(runway_months) if runway_months is not None else 0.0,
+        "runway_display": snapshot.get("current_runway_display", "0.0 months"),
         "health_score": health_metrics["total_score"],
         "pillars": health_metrics["pillars"],
         "budgets_tracked": total_budgets_count,

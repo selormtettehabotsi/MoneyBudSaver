@@ -163,9 +163,9 @@ The app launches full-screen with native 100dvh safe-area support, touch gesture
 ## 🛡️ Pre-Deployment & Schema Migration Safety
 
 Before deploying code updates, re-deploying containers, or applying database schema changes:
-1. **Download a Full JSON Backup**: Go to **Settings** → **Full Database Backup & Disaster Recovery (JSON)** → Click **Export Full Snapshot**.
+1. **Download a Full JSON Backup**: Go to **Settings** → **Full Database Backup & Disaster Recovery (JSON)** → Click **Export Full Snapshot** (or via API: `GET /api/v1/data/backup/json`).
 2. Store the downloaded `.json` snapshot safely on your device or cloud drive.
-3. If anything goes wrong or if rolling back to a previous container version, you can restore all categories, transactions, budgets, savings goals, debts, and deliberations in 1 click using **Restore Snapshot**.
+3. If anything goes wrong or if rolling back to a previous container version, you can restore all categories, transactions, budgets, savings goals, debts, and deliberations in 1 click using **Restore Snapshot** (or via API: `POST /api/v1/data/restore/json`).
 
 > [!IMPORTANT]
 > Schema migrations are automatically executed on startup via `init_db()`. Migrations are idempotent and non-destructive (e.g., adding `client_id`, `token_version`, and creating `council_jobs` without modifying existing rows). Downloading a backup prior to major upgrades is an industry-standard best practice.

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { councilApi } from "../api/council";
-import { CouncilDecision, CouncilJobStatus, ProviderStatusItem } from "../types/council";
+import { CouncilDecision, CouncilJobStatus, ProviderStatusItem, TestConnectionResponse } from "../types/council";
 import { useCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/AuthContext";
 import { useSync } from "../context/SyncContext";
@@ -21,6 +21,12 @@ import {
   Layers,
   AlertTriangle,
   AlertCircle,
+  Activity,
+  Info,
+  Timer,
+  Copy,
+  ExternalLink,
+  XOctagon,
 } from "lucide-react";
 
 interface CouncilPageProps {
@@ -43,12 +49,20 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
   // Deliberation State
   const [loading, setLoading] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
   const [jobProgress, setJobProgress] = useState<CouncilJobStatus | null>(null);
   const [currentDecision, setCurrentDecision] = useState<CouncilDecision | null>(null);
+  const [activeConflictJobId, setActiveConflictJobId] = useState<string | null>(null);
+  const activeIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Providers Status
   const [providers, setProviders] = useState<ProviderStatusItem[]>([]);
   const [history, setHistory] = useState<CouncilDecision[]>([]);
+
+  // Test All Providers State
+  const [isTestAllOpen, setIsTestAllOpen] = useState(false);
+  const [testAllLoading, setTestAllLoading] = useState(false);
+  const [testAllResults, setTestAllResults] = useState<Record<string, TestConnectionResponse>>({});
 
   // Preview Modal State
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -81,6 +95,120 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
     loadProvidersAndHistory();
   }, []);
 
+  const handleTestAllProviders = async () => {
+    setTestAllLoading(true);
+    setIsTestAllOpen(true);
+    setTestAllResults({});
+
+    const configuredProviders = providers.filter((p) => p.is_configured && p.status !== "disabled_in_hosted");
+    const resultsMap: Record<string, TestConnectionResponse> = {};
+
+    try {
+      // Stagger requests sequentially to prevent rate limits and bursting
+      for (const p of configuredProviders) {
+        try {
+          const res = await councilApi.testConnection(p.name, p.model_id);
+          resultsMap[p.name] = res;
+          setTestAllResults({ ...resultsMap });
+        } catch (err: any) {
+          const isRateLimit = err?.status === 429 || (err?.message && err.message.toLowerCase().includes("rate limit"));
+          resultsMap[p.name] = {
+            provider_name: p.name,
+            model_id: p.model_id,
+            http_status: isRateLimit ? 429 : null,
+            latency_ms: 0,
+            status: isRateLimit ? "rate_limited" : "error",
+            diagnosis: isRateLimit
+              ? "Rate limit exceeded (10 tests/min). Please wait a moment."
+              : err.message || "Connection test failed.",
+            model_found_in_list: null,
+            available_models_count: 0,
+            close_matches: [],
+          };
+          setTestAllResults({ ...resultsMap });
+        }
+        // Stagger spacing between requests
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      setTestAllLoading(false);
+    }
+  };
+
+  const handleCancelJob = async (jobId?: string) => {
+    const targetId = jobId || jobProgress?.job_id;
+    if (!targetId) return;
+
+    if (activeIntervalRef.current) {
+      clearInterval(activeIntervalRef.current);
+      activeIntervalRef.current = null;
+    }
+
+    try {
+      await councilApi.cancelJob(targetId);
+      setLoading(false);
+      setRetryingFailed(false);
+      setJobProgress(null);
+      setActiveConflictJobId(null);
+      loadProvidersAndHistory();
+    } catch (err: any) {
+      alert(err.message || "Failed to cancel deliberation job.");
+    }
+  };
+
+  const handleResetCircuitBreaker = async (providerName: string) => {
+    try {
+      await councilApi.resetCircuitBreaker(providerName);
+      await loadProvidersAndHistory();
+    } catch (err: any) {
+      alert(err.message || "Failed to reset circuit breaker.");
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    if (!currentDecision) return;
+    setRetryingFailed(true);
+    try {
+      const job = await councilApi.retryFailed(currentDecision.id);
+      setJobProgress(job);
+
+      if (job.status === "completed" && job.decision) {
+        setCurrentDecision(job.decision);
+        setRetryingFailed(false);
+        loadProvidersAndHistory();
+        return;
+      }
+
+      // Poll background status every 1.5s
+      if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
+      activeIntervalRef.current = setInterval(async () => {
+        try {
+          const currentJob = await councilApi.getJobStatus(job.job_id);
+          setJobProgress(currentJob);
+
+          if (currentJob.status === "completed") {
+            if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
+            if (currentJob.decision) {
+              setCurrentDecision(currentJob.decision);
+            }
+            setRetryingFailed(false);
+            loadProvidersAndHistory();
+          } else if (currentJob.status === "failed" || currentJob.status === "cancelled") {
+            if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
+            setRetryingFailed(false);
+            if (currentJob.status === "failed") alert(currentJob.error || "Retry failed.");
+            loadProvidersAndHistory();
+          }
+        } catch (pollErr: any) {
+          console.error("Retry polling error:", pollErr);
+        }
+      }, 1500);
+    } catch (err: any) {
+      alert(err.message || "Failed to retry providers.");
+      setRetryingFailed(false);
+    }
+  };
+
   const handlePreviewPrompt = async () => {
     if (!question.trim()) return;
     setPreviewLoading(true);
@@ -106,6 +234,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
     setLoading(true);
     setCurrentDecision(null);
     setJobProgress(null);
+    setActiveConflictJobId(null);
 
     try {
       const job = await councilApi.ask({
@@ -126,22 +255,23 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       }
 
       // Poll background status every 1.5s
-      const intervalId = setInterval(async () => {
+      if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
+      activeIntervalRef.current = setInterval(async () => {
         try {
           const currentJob = await councilApi.getJobStatus(job.job_id);
           setJobProgress(currentJob);
 
           if (currentJob.status === "completed") {
-            clearInterval(intervalId);
+            if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
             if (currentJob.decision) {
               setCurrentDecision(currentJob.decision);
             }
             setLoading(false);
             loadProvidersAndHistory();
-          } else if (currentJob.status === "failed") {
-            clearInterval(intervalId);
+          } else if (currentJob.status === "failed" || currentJob.status === "cancelled") {
+            if (activeIntervalRef.current) clearInterval(activeIntervalRef.current);
             setLoading(false);
-            alert(currentJob.error || "Council deliberation failed.");
+            if (currentJob.status === "failed") alert(currentJob.error || "Council deliberation failed.");
             loadProvidersAndHistory();
           }
         } catch (pollErr: any) {
@@ -150,7 +280,12 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       }, 1500);
 
     } catch (err: any) {
-      alert(err.message || "Council deliberation failed to start.");
+      const msg = err.message || "Council deliberation failed to start.";
+      const match = msg.match(/Job ID:\s*([a-zA-Z0-9-]+)/);
+      if (match) {
+        setActiveConflictJobId(match[1]);
+      }
+      alert(msg);
       setLoading(false);
     }
   };
@@ -201,11 +336,35 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
           </span>
         </div>
 
-        {/* Active Providers Badges */}
+        {/* Action & Active Providers Badges */}
         <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+          <button
+            type="button"
+            disabled={!isOnline || testAllLoading}
+            onClick={handleTestAllProviders}
+            className="btn btn-secondary btn-sm flex items-center gap-1.5"
+            style={{ minHeight: "34px", padding: "5px 10px", fontSize: "12px" }}
+            title="Test connection and latency of all configured providers"
+          >
+            {testAllLoading ? (
+              <>
+                <RefreshCw size={13} className="animate-spin" />
+                <span>Testing...</span>
+              </>
+            ) : (
+              <>
+                <Activity size={13} />
+                <span>Test All Providers</span>
+              </>
+            )}
+          </button>
+
           {providers.map((p) => {
             const isReady = p.status === "ready";
-            const statusLabel = isReady
+            const isTripped = p.circuit_breaker_tripped || p.status === "circuit_breaker_tripped";
+            const statusLabel = isTripped
+              ? "Temporarily Skipped"
+              : isReady
               ? "Ready"
               : p.status === "missing_model_id"
               ? "Set Model ID"
@@ -215,7 +374,9 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
               ? "Rate Limited"
               : "Not Configured";
 
-            const badgeClass = isReady
+            const badgeClass = isTripped
+              ? "badge-warning"
+              : isReady
               ? p.is_near_limit
                 ? "badge-warning"
                 : "badge-success"
@@ -228,19 +389,40 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                 style={{
                   fontSize: "11px",
                   padding: "4px 8px",
-                  opacity: isReady ? 1 : 0.75,
+                  opacity: isReady || isTripped ? 1 : 0.75,
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "4px",
                 }}
                 title={`${p.display_name} • ${p.model_family} (${p.model_id || "no model"}) - ${statusLabel}${
-                  p.shares_key_with ? " • Shares rate limit with " + p.shares_key_with : ""
-                }${p.daily_quota_limit ? ` • Today: ${p.daily_request_count}/${p.daily_quota_limit}` : ""}`}
+                  isTripped && p.circuit_breaker_reason ? ` (${p.circuit_breaker_reason})` : ""
+                }${p.shares_key_with ? " • Shares rate limit with " + p.shares_key_with : ""}${
+                  p.daily_quota_limit ? ` • Today: ${p.daily_request_count}/${p.daily_quota_limit}` : ""
+                }`}
               >
                 <Cpu size={12} />
                 <span>
-                  {p.display_name.replace("NVIDIA NIM", "NVIDIA").split(" ")[0]}: {statusLabel}
+                  {p.display_name}: {statusLabel}
                 </span>
+                {isTripped && (
+                  <button
+                    type="button"
+                    onClick={() => handleResetCircuitBreaker(p.name)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--accent-primary)",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      padding: "0 2px",
+                    }}
+                    title="Clear circuit breaker cooldown and retry immediately"
+                  >
+                    Retry now
+                  </button>
+                )}
                 {p.shares_key_with && isReady && (
                   <span style={{ fontSize: "9px", opacity: 0.8, fontStyle: "italic" }}>(shared limit)</span>
                 )}
@@ -256,6 +438,40 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       </div>
 
       <DisclaimerBanner />
+
+      {/* Active Conflict Banner with One-Click Cancel */}
+      {activeConflictJobId && (
+        <div
+          className="glass-panel flex items-center justify-between gap-3"
+          style={{
+            padding: "14px 18px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            background: "rgba(239, 68, 68, 0.08)",
+          }}
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertCircle size={20} className="text-rose-400" />
+            <div>
+              <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>
+                Active Deliberation In Progress
+              </strong>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                Job ID: <code>{activeConflictJobId}</code> is currently occupying the council. You can cancel it to start a new one.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleCancelJob(activeConflictJobId)}
+            className="btn btn-danger btn-sm flex items-center gap-1.5"
+            style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
+          >
+            <XOctagon size={14} />
+            <span>Cancel Active Job</span>
+          </button>
+        </div>
+      )}
 
       {/* Model Family Diversity Warning Banner */}
       {fewerThanFiveFamilies && (
@@ -467,7 +683,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                     {Object.entries(jobProgress.providers_progress).map(([pName, pStatus]) => {
                       const isDone = pStatus.includes("voted") || pStatus.includes("finished");
                       const isFailed = pStatus.includes("failed");
-                      const isSkipped = pStatus.includes("Skipped");
+                      const isSkipped = pStatus.includes("Skipped") || pStatus.includes("Not Configured");
 
                       const badgeClass = isDone
                         ? "badge-success"
@@ -498,6 +714,19 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                     })}
                   </div>
                 )}
+
+                {/* Cancel Deliberation Button */}
+                <div style={{ marginTop: "18px" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelJob()}
+                    className="btn btn-secondary btn-sm flex items-center gap-1.5"
+                    style={{ margin: "0 auto", padding: "6px 14px", fontSize: "12px", color: "var(--accent-rose)" }}
+                  >
+                    <XOctagon size={14} />
+                    <span>Cancel Deliberation</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -505,12 +734,37 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
           {/* Deliberation Results */}
           {currentDecision && !loading && (
             <div className="flex flex-col gap-6" style={{ width: "100%" }}>
+              {/* Insufficient Data Notice Banner if history < 14 days */}
+              {currentDecision.financial_snapshot?.has_sufficient_data === false && (
+                <div
+                  className="glass-panel flex items-start gap-3"
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid rgba(99, 102, 241, 0.35)",
+                    background: "rgba(99, 102, 241, 0.08)",
+                  }}
+                >
+                  <Info size={18} style={{ color: "var(--accent-primary)", flexShrink: 0, marginTop: "2px" }} />
+                  <div style={{ fontSize: "13px", lineHeight: "1.4" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Notice: Limited Spending History</strong>
+                    <p style={{ margin: "2px 0 0 0", color: "var(--text-secondary)" }}>
+                      {currentDecision.financial_snapshot.data_notice || "Add at least 2 weeks of spending for reliable advice."}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Final Consensus Tally Panel */}
               <CouncilTallyPanel
                 tally={currentDecision.final_tally}
                 guardrailViolations={currentDecision.guardrail_breach?.guardrail_violations}
                 userVerdict={currentDecision.user_verdict}
                 userModifications={currentDecision.user_modifications}
+                hasSufficientData={currentDecision.financial_snapshot?.has_sufficient_data}
+                dataNotice={currentDecision.financial_snapshot?.data_notice}
+                retryingFailed={retryingFailed}
+                onRetryFailed={handleRetryFailed}
                 onUserDecision={handlePromptUserDecision}
               />
 
@@ -569,9 +823,14 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
                   </span>
                   <div className="flex items-center gap-2" style={{ flex: 1, justifyContent: "flex-end" }}>
                     <button
+                      disabled={currentDecision.final_tally.final_verdict === "no_quorum"}
                       onClick={() => handlePromptUserDecision("accepted")}
                       className="btn btn-sm btn-success flex items-center gap-1"
-                      style={{ minHeight: "38px" }}
+                      style={{
+                        minHeight: "38px",
+                        opacity: currentDecision.final_tally.final_verdict === "no_quorum" ? 0.4 : 1,
+                      }}
+                      title={currentDecision.final_tally.final_verdict === "no_quorum" ? "Quorum not met" : undefined}
                     >
                       <CheckCircle2 size={14} />
                       <span>Accept</span>
@@ -646,6 +905,174 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
           </div>
         </div>
       </div>
+
+      {/* Test All Providers Results Modal */}
+      <Modal
+        isOpen={isTestAllOpen}
+        onClose={() => setIsTestAllOpen(false)}
+        title="Council Provider Connectivity & Latency Benchmark"
+        maxWidth="680px"
+      >
+        <div className="flex flex-col gap-4">
+          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+            Ping tests sent to all active model families with non-financial verification prompts:
+          </p>
+
+          <div className="flex flex-col gap-2.5">
+            {providers
+              .filter((p) => p.is_configured && p.status !== "disabled_in_hosted")
+              .map((p) => {
+                const res = testAllResults[p.name];
+                return (
+                  <div
+                    key={p.name}
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--bg-surface-solid)",
+                      border: "1px solid var(--border-color)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    }}
+                  >
+                    <div className="flex items-center justify-between" style={{ gap: "8px", flexWrap: "wrap" }}>
+                      <div className="flex items-center gap-2.5">
+                        <Cpu size={16} style={{ color: "var(--accent-primary)" }} />
+                        <div>
+                          <strong style={{ fontSize: "13px" }}>{p.display_name}</strong>
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                            {p.model_family} • <code>{p.model_id}</code>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {res ? (
+                          <>
+                            <span
+                              className={`badge ${
+                                res.status === "success"
+                                  ? "badge-success"
+                                  : res.status === "invalid_key"
+                                  ? "badge-danger"
+                                  : "badge-warning"
+                              }`}
+                              style={{ fontSize: "11px", textTransform: "capitalize" }}
+                            >
+                              {res.status.replace("_", " ")}
+                            </span>
+
+                            {res.catalog_ok !== undefined && (
+                              <span className={`badge ${res.catalog_ok ? "badge-info" : "badge-secondary"}`} style={{ fontSize: "10px" }}>
+                                Catalog: {res.catalog_ok ? "OK" : "Failed"}
+                              </span>
+                            )}
+
+                            {res.chat_status && (
+                              <span className={`badge ${res.chat_status === "success" ? "badge-success" : "badge-warning"}`} style={{ fontSize: "10px" }}>
+                                Chat: {res.chat_status}
+                              </span>
+                            )}
+
+                            {res.ttft_ms !== null && res.ttft_ms !== undefined && (
+                              <span className="badge badge-secondary flex items-center gap-1" style={{ fontSize: "10px" }} title="Time to first token">
+                                <Timer size={10} />
+                                <span>TTFT: {res.ttft_ms}ms</span>
+                              </span>
+                            )}
+
+                            {res.latency_ms > 0 && (
+                              <span className="badge badge-secondary flex items-center gap-1" style={{ fontSize: "11px" }}>
+                                <span>{res.latency_ms >= 1000 ? `${(res.latency_ms / 1000).toFixed(1)}s` : `${res.latency_ms}ms`}</span>
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="badge badge-secondary flex items-center gap-1" style={{ fontSize: "11px" }}>
+                            <RefreshCw size={11} className="animate-spin" />
+                            <span>Testing...</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {res && res.diagnosis && (
+                      <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.3" }}>
+                        {res.diagnosis}
+                      </div>
+                    )}
+
+                    {/* Rate Limit Retry-After Warning */}
+                    {res?.retry_after_seconds && (
+                      <div className="badge-warning flex items-center gap-1.5" style={{ padding: "4px 8px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
+                        <AlertCircle size={12} />
+                        <span>Rate limited. Recommended retry in <strong>{res.retry_after_seconds} seconds</strong>.</span>
+                      </div>
+                    )}
+
+                    {/* OpenRouter Privacy Hint */}
+                    {res?.privacy_hint && (
+                      <div className="badge-warning flex items-start gap-1.5" style={{ padding: "6px 8px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
+                        <Info size={12} style={{ flexShrink: 0, marginTop: "2px" }} />
+                        <div>
+                          <span>{res.privacy_hint}</span>{" "}
+                          <a
+                            href="https://openrouter.ai/settings/privacy"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ textDecoration: "underline", color: "var(--accent-primary)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "2px" }}
+                          >
+                            <span>OpenRouter Privacy Settings</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* OpenRouter Free Models with One-Click Copy */}
+                    {res?.free_models && res.free_models.length > 0 && (
+                      <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: "6px", marginTop: "2px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "4px" }}>
+                          Available Free Models ({res.free_models.length} zero-price):
+                        </div>
+                        <div className="flex flex-wrap gap-1" style={{ maxHeight: "100px", overflowY: "auto" }}>
+                          {res.free_models.map((mId) => (
+                            <button
+                              key={mId}
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(mId);
+                                alert(`Copied model ID:\n${mId}`);
+                              }}
+                              className="btn btn-secondary btn-sm flex items-center gap-1"
+                              style={{ padding: "2px 6px", fontSize: "10px", minHeight: "22px" }}
+                            >
+                              <Copy size={9} />
+                              <code>{mId}</code>
+                              <span className="badge badge-success" style={{ fontSize: "8px", padding: "0 2px" }}>Free</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+
+          <div className="flex justify-end" style={{ marginTop: "6px" }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setIsTestAllOpen(false)}
+              style={{ minHeight: "44px" }}
+            >
+              Close Benchmark
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Prompt Preview Modal */}
       <Modal

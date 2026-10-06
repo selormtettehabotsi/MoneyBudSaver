@@ -1,10 +1,11 @@
-export type CouncilVerdict = "approve" | "reject" | "approve_with_conditions" | "split_decision";
+export type CouncilVerdict = "approve" | "reject" | "approve_with_conditions" | "split_decision" | "no_quorum";
 
 export interface IndividualVote {
   provider_name: string;
+  display_name?: string | null;
   model_id: string;
   model_family: string;
-  status: "success" | "failed" | "timeout" | "rate_limited" | "skipped" | "unavailable" | "missing_key" | "not_configured";
+  status: "success" | "failed" | "timeout" | "rate_limited" | "skipped" | "unavailable" | "missing_key" | "not_configured" | "invalid_key" | "model_not_found";
   verdict: "approve" | "reject" | "approve_with_conditions" | null;
   confidence: number | null;
   reasoning: string | null;
@@ -12,6 +13,7 @@ export interface IndividualVote {
   conditions: string[];
   suggested_amount: string | null;
   round_number: number;
+  latency_ms?: number | null;
   error_message?: string | null;
 }
 
@@ -24,6 +26,8 @@ export interface CouncilTally {
   is_tie: boolean;
   total_votes_counted: number;
   total_votes_skipped: number;
+  min_quorum_required?: number;
+  has_quorum?: boolean;
 }
 
 export interface CouncilDecision {
@@ -48,7 +52,7 @@ export interface CouncilDecision {
 
 export interface CouncilJobStatus {
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
   current_round: number;
   total_rounds: number;
   providers_progress: Record<string, string>;
@@ -61,8 +65,15 @@ export interface TestConnectionResponse {
   model_id: string;
   http_status?: number | null;
   latency_ms: number;
-  status: "success" | "invalid_key" | "model_not_found" | "rate_limited" | "timeout" | "bad_json" | "error" | "skipped";
+  status: "success" | "invalid_key" | "model_not_found" | "rate_limited" | "timeout" | "ttft_timeout" | "bad_json" | "error" | "skipped";
   diagnosis: string;
+  catalog_ok?: boolean | null;
+  chat_status?: string | null;
+  ttft_ms?: number | null;
+  retry_after_seconds?: number | null;
+  is_free?: boolean | null;
+  free_models?: string[];
+  privacy_hint?: string | null;
   model_found_in_list?: boolean | null;
   available_models_count: number;
   close_matches: string[];
@@ -79,5 +90,8 @@ export interface ProviderStatusItem {
   daily_quota_limit?: number | null;
   is_near_limit?: boolean;
   shares_key_with?: string | null;
-  status: "ready" | "missing_key" | "missing_model_id" | "disabled_in_hosted" | "rate_limited";
+  status: "ready" | "missing_key" | "missing_model_id" | "disabled_in_hosted" | "rate_limited" | "circuit_breaker_tripped";
+  circuit_breaker_tripped?: boolean;
+  circuit_breaker_reason?: string | null;
+  circuit_breaker_resets_in_seconds?: number | null;
 }

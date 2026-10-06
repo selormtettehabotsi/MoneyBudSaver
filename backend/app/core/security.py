@@ -30,11 +30,13 @@ def redact_sensitive_info(text: Optional[str]) -> str:
     s = re.sub(r'(?i)([?&](?:api[-_]?)?key=)[^&\s"\']+', r'\1[REDACTED]', s)
     # Redact header key-values
     s = re.sub(r'(?i)(x-goog-api-key|authorization|api[-_]?key)[:=]\s*["\']?[a-zA-Z0-9_\-\.]{8,}["\']?', r'\1: [REDACTED]', s)
-    # Redact well-known vendor key patterns
-    s = re.sub(r'gsk_[a-zA-Z0-9]{20,}', 'gsk_[REDACTED]', s)
-    s = re.sub(r'sk-[a-zA-Z0-9]{20,}', 'sk-[REDACTED]', s)
-    s = re.sub(r'AIzaSy[a-zA-Z0-9_\-]{25,}', 'AIzaSy[REDACTED]', s)
-    s = re.sub(r'nvapi-[a-zA-Z0-9_\-]{20,}', 'nvapi-[REDACTED]', s)
+    # Redact well-known vendor key patterns and prefixes
+    s = re.sub(r'gsk_[a-zA-Z0-9_\-]{15,}', 'gsk_[REDACTED]', s)
+    s = re.sub(r'sk-[a-zA-Z0-9_\-\.]{8,}', 'sk-[REDACTED]', s)
+    s = re.sub(r'AIzaSy[a-zA-Z0-9_\-]{20,}', 'AIzaSy[REDACTED]', s)
+    s = re.sub(r'nvapi-[a-zA-Z0-9_\-]{15,}', 'nvapi-[REDACTED]', s)
+    # Generic token pattern in error messages: "key <secret>", "token <secret>"
+    s = re.sub(r'(?i)\b(key|token|secret|password)\s+([a-zA-Z0-9_\-\.]{16,})\b', r'\1 [REDACTED]', s)
     return s
 
 

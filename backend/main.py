@@ -20,14 +20,16 @@ from app.api.api_router import api_v1_router
 from app.api.v1.health import router as health_router
 from app.api.v1.cron import router as cron_router
 
-# Set log levels for external HTTP libraries to prevent logging sensitive URLs / query parameters
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+from app.core.logging_config import setup_secure_logging
+
+# Configure log safety and redaction across all loggers
+setup_secure_logging()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database tables on startup
+    setup_secure_logging()
     init_db()
     yield
 

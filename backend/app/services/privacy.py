@@ -33,23 +33,33 @@ def build_anonymized_council_context(
     Constructs a strictly structured, PII-free financial fact sheet for LLMs.
     Contains only deterministic numbers, ratios, and category percentages.
     """
+    has_sufficient = financial_snapshot.get("has_sufficient_data", True)
+    runway_val = financial_snapshot.get("current_runway_months")
+    data_notice = financial_snapshot.get("data_notice") or "Add at least 2 weeks of spending for reliable advice."
+    runway_str = f"{runway_val:.1f} months of living expenses" if (has_sufficient and runway_val is not None) else f"Not enough data ({data_notice})"
+
     lines = [
         f"FINANCIAL FACTS & RATIOS (All arithmetic pre-computed deterministically in {user_currency}):",
         f"- Monthly Net Cash Flow: {user_currency} {financial_snapshot.get('net_cashflow', 0.0):,.2f}",
         f"  (Total Monthly Income: {user_currency} {financial_snapshot.get('monthly_income', 0.0):,.2f} | Total Monthly Expenses: {user_currency} {financial_snapshot.get('monthly_expense', 0.0):,.2f})",
         f"- 90-Day Average Monthly Expenses: {user_currency} {financial_snapshot.get('avg_monthly_expense_90d', 0.0):,.2f}",
         f"- Current Liquid Savings: {user_currency} {financial_snapshot.get('total_liquid_savings', 0.0):,.2f}",
-        f"- Current Runway: {financial_snapshot.get('current_runway_months', 0.0):.1f} months of living expenses",
+        f"- Current Runway: {runway_str}",
         f"- Total Existing Debt Balance: {user_currency} {financial_snapshot.get('total_debt_balance', 0.0):,.2f}",
         f"- Total Monthly Debt Obligations: {user_currency} {financial_snapshot.get('total_monthly_debt_obligations', 0.0):,.2f}",
         f"- Current Debt-to-Income (DTI) Ratio: {financial_snapshot.get('current_dti_pct', 0.0):.1f}%",
         f"- Current Savings Rate: {financial_snapshot.get('savings_rate_pct', 0.0):.1f}%",
     ]
 
+    if not has_sufficient:
+        lines.append("- DATA QUALITY: INSUFFICIENT_HISTORY (fewer than 14 days of spending history)")
+        lines.append(f"- DATA NOTICE: {data_notice}")
+        lines.append("- INSTRUCTIONS FOR INSUFFICIENT DATA: Spending history is limited (< 14 days), so safety checks and runway cannot be fully verified. You MUST state in your reasoning that advice is low-confidence due to limited history, and you MUST cap your confidence rating at a maximum of 40%.")
+
     # Post-decision projection if candidate amount was provided
     if financial_snapshot.get("post_decision_dti_pct") != financial_snapshot.get("current_dti_pct"):
         lines.append(f"- Projected Post-Decision DTI: {financial_snapshot.get('post_decision_dti_pct', 0.0):.1f}%")
-    if financial_snapshot.get("post_decision_runway_months") != financial_snapshot.get("current_runway_months"):
+    if has_sufficient and financial_snapshot.get("post_decision_runway_months") is not None and financial_snapshot.get("post_decision_runway_months") != financial_snapshot.get("current_runway_months"):
         lines.append(f"- Projected Post-Decision Runway: {financial_snapshot.get('post_decision_runway_months', 0.0):.1f} months")
 
     # Guardrails

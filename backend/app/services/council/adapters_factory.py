@@ -1,6 +1,7 @@
 """
 Provider Adapters Factory and Registry.
 Initializes and manages all active AI Council member plugins across 4+ distinct model families.
+Supports configurable timeouts (default 25s, NVIDIA NIM 90s), reasoning effort controls, and friendly display names.
 """
 from typing import List, Dict, Optional
 from app.config import settings
@@ -21,6 +22,10 @@ def get_configured_providers(
     custom_tokens = (user_settings or {}).get("custom_max_tokens", {})
     custom_reasoning = (user_settings or {}).get("custom_reasoning_efforts", {})
     custom_thinking = (user_settings or {}).get("custom_thinking_levels", {})
+    custom_timeouts = (user_settings or {}).get("custom_timeouts", {})
+
+    default_timeout = settings.AI_PROVIDER_DEFAULT_TIMEOUT_SECONDS
+    nvidia_timeout = custom_timeouts.get("nvidia", settings.NVIDIA_PROVIDER_TIMEOUT_SECONDS)
 
     # In local-only mode, use exclusively Ollama
     if local_only_mode:
@@ -34,6 +39,7 @@ def get_configured_providers(
                 model_id=custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
                 base_url=f"{settings.OLLAMA_BASE_URL}/v1",
                 is_local=True,
+                timeout_seconds=custom_timeouts.get("ollama", default_timeout),
                 max_tokens=custom_tokens.get("ollama", 4096),
             )
         ]
@@ -50,6 +56,7 @@ def get_configured_providers(
                 model_id=custom_models.get("gemini", settings.GEMINI_MODEL_ID),
                 api_key=settings.GEMINI_API_KEY,
                 thinking_level=custom_thinking.get("gemini", "low"),
+                timeout_seconds=custom_timeouts.get("gemini", default_timeout),
                 max_output_tokens=custom_tokens.get("gemini", 4096),
             )
         )
@@ -64,6 +71,7 @@ def get_configured_providers(
                 model_id=custom_models.get("groq", settings.GROQ_MODEL_ID),
                 base_url="https://api.groq.com/openai/v1",
                 api_key=settings.GROQ_API_KEY,
+                timeout_seconds=custom_timeouts.get("groq", default_timeout),
                 max_tokens=custom_tokens.get("groq", 4096),
                 reasoning_effort=custom_reasoning.get("groq", "low"),
             )
@@ -74,11 +82,12 @@ def get_configured_providers(
         adapters.append(
             OpenAICompatibleAdapter(
                 name="cerebras",
-                display_name="Cerebras Llama (Paid/Trial)",
+                display_name="Cerebras Llama",
                 model_family="Meta Llama Family",
                 model_id=custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
                 base_url="https://api.cerebras.ai/v1",
                 api_key=settings.CEREBRAS_API_KEY,
+                timeout_seconds=custom_timeouts.get("cerebras", default_timeout),
                 max_tokens=custom_tokens.get("cerebras", 4096),
             )
         )
@@ -93,6 +102,7 @@ def get_configured_providers(
                 model_id=custom_models.get("mistral", settings.MISTRAL_MODEL_ID),
                 base_url="https://api.mistral.ai/v1",
                 api_key=settings.MISTRAL_API_KEY,
+                timeout_seconds=custom_timeouts.get("mistral", default_timeout),
                 max_tokens=custom_tokens.get("mistral", 4096),
             )
         )
@@ -107,6 +117,7 @@ def get_configured_providers(
                 model_id=custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID),
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.OPENROUTER_API_KEY,
+                timeout_seconds=custom_timeouts.get("openrouter", default_timeout),
                 max_tokens=custom_tokens.get("openrouter", 4096),
                 reasoning_effort=custom_reasoning.get("openrouter", "low"),
                 extra_headers={
@@ -121,13 +132,16 @@ def get_configured_providers(
         adapters.append(
             OpenAICompatibleAdapter(
                 name="nvidia",
-                display_name="NVIDIA NIM (GLM)",
+                display_name="NVIDIA GLM",
                 model_family="Zhipu GLM",
                 model_id=custom_models.get("nvidia", settings.NVIDIA_MODEL_ID),
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=settings.NVIDIA_API_KEY,
+                timeout_seconds=nvidia_timeout,
                 max_tokens=custom_tokens.get("nvidia", 4096),
+                reasoning_effort=custom_reasoning.get("nvidia", "low"),
                 shared_rate_limit_key="nvidia",
+                stagger_interval_seconds=settings.SHARED_KEY_STAGGER_INTERVAL_SECONDS,
             )
         )
 
@@ -140,13 +154,16 @@ def get_configured_providers(
         adapters.append(
             OpenAICompatibleAdapter(
                 name="nvidia_kimi",
-                display_name="NVIDIA NIM (Kimi)",
+                display_name="Kimi (NVIDIA)",
                 model_family="Moonshot Kimi",
                 model_id=custom_models.get("nvidia_kimi", settings.NVIDIA_KIMI_MODEL_ID),
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=settings.NVIDIA_API_KEY,
+                timeout_seconds=nvidia_timeout,
                 max_tokens=custom_tokens.get("nvidia_kimi", 4096),
+                reasoning_effort=custom_reasoning.get("nvidia_kimi", "low"),
                 shared_rate_limit_key="nvidia",
+                stagger_interval_seconds=settings.SHARED_KEY_STAGGER_INTERVAL_SECONDS,
             )
         )
 
@@ -160,6 +177,7 @@ def get_configured_providers(
                 model_id=custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
                 base_url=f"{settings.OLLAMA_BASE_URL}/v1",
                 is_local=True,
+                timeout_seconds=custom_timeouts.get("ollama", default_timeout),
                 max_tokens=custom_tokens.get("ollama", 4096),
             )
         )

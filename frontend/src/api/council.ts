@@ -49,4 +49,22 @@ export const councilApi = {
       method: "POST",
       body: JSON.stringify({ user_verdict, user_modifications }),
     }),
+
+  retryFailed: (id: string) =>
+    apiClient<CouncilJobStatus>(`/api/v1/council/decision/${id}/retry-failed`, {
+      method: "POST",
+    }),
+
+  cancelJob: (job_id: string) =>
+    apiClient<CouncilJobStatus>(`/api/v1/council/jobs/${job_id}/cancel`, {
+      method: "POST",
+    }),
+
+  resetCircuitBreaker: (provider_name: string) =>
+    apiClient<{ status: string; provider_name: string; message: string }>(
+      `/api/v1/council/providers/${provider_name}/reset-circuit-breaker`,
+      {
+        method: "POST",
+      }
+    ),
 };

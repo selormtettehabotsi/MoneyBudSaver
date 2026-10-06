@@ -163,11 +163,18 @@ def calculate_user_financial_snapshot(
     total_debt_balance = sum((d.remaining_balance for d in debts), ZERO)
     total_monthly_debt_payments = sum((d.minimum_payment for d in debts), ZERO)
 
-    # 5. Ratios
+    # 5. Check Sufficient Transaction History (at least 14 days and >= 3 transactions)
+    oldest_tx = db.query(func.min(Transaction.date)).filter(Transaction.user_id == user_id).scalar()
+    total_tx_count = db.query(func.count(Transaction.id)).filter(Transaction.user_id == user_id).scalar() or 0
+    days_span = (as_of_date - oldest_tx).days if oldest_tx else 0
+    has_sufficient_data = bool(oldest_tx and days_span >= 14 and total_tx_count >= 3)
+    data_notice = None if has_sufficient_data else "Add at least 2 weeks of spending for reliable advice."
+
+    # 6. Ratios
     current_dti = calculate_dti_ratio(total_monthly_debt_payments, current_month_income)
     current_runway = calculate_runway_months(total_liquid_savings, avg_monthly_expense)
 
-    # 6. Category Expense Breakdown for Current Month
+    # 7. Category Expense Breakdown for Current Month
     category_rows = (
         db.query(
             Category.name,
@@ -198,7 +205,7 @@ def calculate_user_financial_snapshot(
             "percentage": pct,
         })
 
-    # 7. Hypothetical Post-Decision Projection & Guardrails
+    # 8. Hypothetical Post-Decision Projection & Guardrails
     post_dti = current_dti
     post_runway = current_runway
     guardrail_violations = []
@@ -226,17 +233,21 @@ def calculate_user_financial_snapshot(
             f"Projected Debt-to-Income after loan ({post_dti:.1f}%) exceeds maximum safe threshold of {max_dti_threshold:.1f}%."
         )
 
-    if current_runway < min_runway_dec:
-        guardrail_violations.append(
-            f"Current runway ({current_runway:.1f} months) is below safe emergency threshold of {min_runway_threshold:.1f} months."
-        )
-    if post_runway < min_runway_dec and post_runway != current_runway:
-        guardrail_violations.append(
-            f"Projected runway after expenditure ({post_runway:.1f} months) falls below minimum {min_runway_threshold:.1f} months."
-        )
+    # Only evaluate runway guardrails if sufficient historical spending data exists
+    if has_sufficient_data:
+        if current_runway < min_runway_dec:
+            guardrail_violations.append(
+                f"Current runway ({current_runway:.1f} months) is below safe emergency threshold of {min_runway_threshold:.1f} months."
+            )
+        if post_runway < min_runway_dec and post_runway != current_runway:
+            guardrail_violations.append(
+                f"Projected runway after expenditure ({post_runway:.1f} months) falls below minimum {min_runway_threshold:.1f} months."
+            )
 
     return {
         "as_of_date": as_of_date.isoformat(),
+        "has_sufficient_data": has_sufficient_data,
+        "data_notice": data_notice,
         "monthly_income": float(current_month_income),
         "monthly_expense": float(current_month_expense),
         "net_cashflow": float(net_cashflow),
@@ -246,9 +257,11 @@ def calculate_user_financial_snapshot(
         "total_debt_balance": float(total_debt_balance),
         "total_monthly_debt_obligations": float(total_monthly_debt_payments),
         "current_dti_pct": float(current_dti),
-        "current_runway_months": float(current_runway),
+        "current_runway_months": float(current_runway) if has_sufficient_data else None,
+        "current_runway_display": f"{float(current_runway):.1f} months" if has_sufficient_data else "Not enough data",
         "post_decision_dti_pct": float(post_dti),
-        "post_decision_runway_months": float(post_runway),
+        "post_decision_runway_months": float(post_runway) if has_sufficient_data else None,
+        "post_decision_runway_display": f"{float(post_runway):.1f} months" if has_sufficient_data else "Not enough data",
         "category_breakdown": category_breakdown,
         "guardrail_breached": len(guardrail_violations) > 0,
         "guardrail_violations": guardrail_violations,

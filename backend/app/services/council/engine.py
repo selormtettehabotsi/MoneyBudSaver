@@ -1,12 +1,13 @@
 """
 AI Council Deliberation Orchestrator Engine.
 Runs deterministic pre-computations, anonymization, parallel multi-model Round 1 & Round 2 debate,
-confidence-weighted tallying, dissent synthesis, and quota management.
+confidence-weighted tallying, quorum enforcement, dissent synthesis, and quota management.
 Supports asynchronous background jobs with real-time per-provider progress tracking and persistent database recovery.
 """
 import asyncio
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -31,6 +32,11 @@ from app.services.financial_math import calculate_user_financial_snapshot
 from app.services.privacy import scrub_pii_from_text, build_anonymized_council_context
 from app.services.council.adapters_factory import get_configured_providers
 from app.services.council.base_adapter import BaseProviderAdapter
+from app.services.council.health_manager import (
+    is_circuit_breaker_active,
+    record_provider_success,
+    record_provider_failure,
+)
 
 
 SYSTEM_INSTRUCTION_ROUND1 = """
@@ -66,24 +72,36 @@ def _compute_query_hash(user_id: str, question: str, amount: Optional[Decimal], 
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _calculate_tally(votes: List[IndividualVote]) -> CouncilTally:
+def _calculate_tally(votes: List[IndividualVote], min_quorum: Optional[int] = None) -> CouncilTally:
     """
-    Computes the confidence-weighted tally and synthesizes consensus & dissent.
+    Computes the confidence-weighted tally, enforces quorum requirements, and synthesizes consensus & dissent.
     Scoring: approve=+1.0, approve_with_conditions=+0.5, reject=-1.0.
+    If valid votes < min_quorum (default 3), returns 'no_quorum' verdict.
     """
+    quorum_threshold = min_quorum if min_quorum is not None else settings.COUNCIL_MIN_QUORUM_VOTES
     successful_votes = [v for v in votes if v.status == "success" and v.verdict is not None]
     skipped_votes = len(votes) - len(successful_votes)
 
-    if not successful_votes:
+    # 1. Quorum check
+    if len(successful_votes) < quorum_threshold:
+        if not successful_votes:
+            summary = "All AI Council members were unavailable or rate-limited. Please retry shortly."
+        else:
+            summary = (
+                f"Not enough votes: Only {len(successful_votes)} of {quorum_threshold} required valid votes were collected. "
+                "Please retry failed providers to reach quorum."
+            )
         return CouncilTally(
             weighted_score=0.0,
-            final_verdict="split_decision",
-            consensus_summary="All AI Council members were unavailable or rate-limited. Please retry shortly.",
+            final_verdict="no_quorum",
+            consensus_summary=summary,
             key_agreements=[],
             key_disagreements=[],
-            is_tie=True,
-            total_votes_counted=0,
+            is_tie=False,
+            total_votes_counted=len(successful_votes),
             total_votes_skipped=skipped_votes,
+            min_quorum_required=quorum_threshold,
+            has_quorum=False,
         )
 
     total_weight = 0.0
@@ -106,10 +124,11 @@ def _calculate_tally(votes: List[IndividualVote]) -> CouncilTally:
         all_risks.extend(v.risks)
         all_conditions.extend(v.conditions)
 
+        name_label = v.display_name or v.provider_name
         if v.verdict in ("approve", "approve_with_conditions") and v.reasoning:
-            approve_reasons.append(f"{v.provider_name}: {v.reasoning}")
+            approve_reasons.append(f"{name_label}: {v.reasoning}")
         elif v.verdict == "reject" and v.reasoning:
-            reject_reasons.append(f"{v.provider_name}: {v.reasoning}")
+            reject_reasons.append(f"{name_label}: {v.reasoning}")
 
     weighted_score = round(total_weight / total_confidence, 3) if total_confidence > 0 else 0.0
 
@@ -161,6 +180,8 @@ def _calculate_tally(votes: List[IndividualVote]) -> CouncilTally:
         is_tie=is_tie,
         total_votes_counted=len(successful_votes),
         total_votes_skipped=skipped_votes,
+        min_quorum_required=quorum_threshold,
+        has_quorum=True,
     )
 
 
@@ -168,7 +189,7 @@ def _record_provider_usage(db: Session, votes: List[IndividualVote]):
     """Records daily usage per provider in the ProviderQuota table."""
     today = date.today()
     for v in votes:
-        if v.status in ("skipped", "not_configured"):
+        if v.status in ("skipped", "not_configured", "missing_key"):
             continue
         try:
             quota = db.query(ProviderQuota).filter(
@@ -218,6 +239,8 @@ async def _run_deliberation_task(
     updates live provider progress, and writes final persisted results to DB.
     """
     db = _create_worker_db_session()
+    min_quorum = int(user_settings.get("min_quorum_votes", settings.COUNCIL_MIN_QUORUM_VOTES))
+
     try:
         anonymized_context = build_anonymized_council_context(snapshot, currency)
         amt_line = f"PROPOSED AMOUNT: {currency} {float(request.candidate_amount):,.2f}\n\n" if request.candidate_amount else ""
@@ -237,13 +260,14 @@ async def _run_deliberation_task(
         if not providers:
             dummy_vote = IndividualVote(
                 provider_name="System",
+                display_name="System",
                 model_id="none",
                 model_family="System",
-                status="skipped",
+                status="not_configured",
                 round_number=1,
                 error_message="No AI provider API keys configured in environment or settings.",
             )
-            tally = _calculate_tally([dummy_vote])
+            tally = _calculate_tally([dummy_vote], min_quorum=min_quorum)
 
             decision = db.query(CouncilDecision).filter(CouncilDecision.id == job_id).first()
             if decision:
@@ -261,38 +285,71 @@ async def _run_deliberation_task(
             if db_job:
                 db_job.status = "completed"
                 db_job.decision_id = job_id
-                db_job.providers_progress = {"system": "Skipped (No keys)"}
+                db_job.providers_progress = {"system": "Not Configured (No keys)"}
                 db_job.updated_at = datetime.now(timezone.utc)
                 db.commit()
 
             if job_id in _DELIBERATION_JOBS:
                 _DELIBERATION_JOBS[job_id]["status"] = "completed"
                 _DELIBERATION_JOBS[job_id]["decision"] = decision_out
-                _DELIBERATION_JOBS[job_id]["providers_progress"] = {"system": "Skipped (No keys)"}
+                _DELIBERATION_JOBS[job_id]["providers_progress"] = {"system": "Not Configured (No keys)"}
             return
 
-        timeout = settings.AI_PROVIDER_TIMEOUT_SECONDS
+        has_sufficient = snapshot.get("has_sufficient_data", True)
 
         # Track provider queries and update progress incrementally
         async def query_with_progress(p: BaseProviderAdapter, prompt: str, sys_inst: str, r_num: int) -> IndividualVote:
+            # 1. Check circuit breaker
+            tripped, trip_reason, trip_secs = is_circuit_breaker_active(db, p.name)
+            if tripped:
+                if job_id in _DELIBERATION_JOBS:
+                    _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Temporarily skipped ({trip_reason})"
+                return IndividualVote(
+                    provider_name=p.name,
+                    display_name=p.display_name,
+                    model_id=p.model_id,
+                    model_family=p.model_family,
+                    status="skipped",
+                    round_number=r_num,
+                    error_message=f"Temporarily skipped: Circuit breaker tripped ({trip_reason}). Resets in {trip_secs}s.",
+                )
+
             if job_id in _DELIBERATION_JOBS:
                 _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} querying..."
             try:
                 res = await p.query(
                     prompt=prompt,
                     system_instruction=sys_inst,
-                    timeout_seconds=timeout,
+                    timeout_seconds=p.timeout_seconds,
                     round_number=r_num,
                 )
+                if not has_sufficient and res.confidence is not None and res.confidence > 40:
+                    res.confidence = 40
                 if job_id in _DELIBERATION_JOBS:
                     status_text = "voted" if res.status == "success" else res.status
                     _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} {status_text}"
+                
+                # Record health status
+                if res.status == "success":
+                    record_provider_success(db, p.name)
+                elif res.status == "rate_limited":
+                    r_secs = None
+                    if res.error_message:
+                        m = re.search(r'Retry in (\d+) seconds', res.error_message)
+                        if m:
+                            r_secs = int(m.group(1))
+                    record_provider_failure(db, p.name, res.status, retry_after_seconds=r_secs)
+                elif res.status in ("timeout", "failed", "error"):
+                    record_provider_failure(db, p.name, res.status)
+
                 return res
             except Exception as ex:
                 if job_id in _DELIBERATION_JOBS:
                     _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} failed"
+                record_provider_failure(db, p.name, "exception")
                 return IndividualVote(
                     provider_name=p.name,
+                    display_name=p.display_name,
                     model_id=p.model_id,
                     model_family=p.model_family,
                     status="failed",
@@ -341,8 +398,9 @@ async def _run_deliberation_task(
 
             peer_lines = ["PEER COUNCIL MEMBER ROUND 1 POSITIONS:"]
             for v in successful_r1:
+                name_label = v.display_name or v.provider_name
                 peer_lines.append(
-                    f"- {v.provider_name} ({v.model_family}): Voted {v.verdict.upper()} (Confidence: {v.confidence}%) | "
+                    f"- {name_label} ({v.model_family}): Voted {v.verdict.upper()} (Confidence: {v.confidence}%) | "
                     f"Reasoning: {v.reasoning} | Identified Risks: {', '.join(v.risks)}"
                 )
             peer_summary = "\n".join(peer_lines)
@@ -362,8 +420,8 @@ async def _run_deliberation_task(
             effective_votes = round2_results
             _record_provider_usage(db, round2_results)
 
-        # Final Tally
-        final_tally = _calculate_tally(effective_votes)
+        # Final Tally with Quorum Check
+        final_tally = _calculate_tally(effective_votes, min_quorum=min_quorum)
 
         # Update DB CouncilDecision record
         decision = db.query(CouncilDecision).filter(CouncilDecision.id == job_id).first()
@@ -425,11 +483,11 @@ def create_deliberation_job(
     """
     Creates a persistent Council decision job record and starts async deliberation.
     - Enforces 1 active job per user (409 Conflict if active job already running).
-    - Checks 3-minute timeout on older active jobs.
+    - Checks 5-minute timeout on older active jobs.
     - Returns immediately with CouncilJobStatus containing job_id and initial progress.
     """
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=180)  # 3 minutes
+    cutoff = now - timedelta(seconds=settings.COUNCIL_JOB_TIMEOUT_SECONDS)
 
     # 1. Enforce 1 active job per user rule
     active_jobs = db.query(CouncilJob).filter(
@@ -443,12 +501,12 @@ def create_deliberation_job(
             c_at = c_at.replace(tzinfo=timezone.utc)
         if c_at < cutoff:
             aj.status = "failed"
-            aj.error = "Deliberation timed out after 3 minutes."
+            aj.error = f"Deliberation timed out after {settings.COUNCIL_JOB_TIMEOUT_SECONDS // 60} minutes."
             aj.updated_at = now
         else:
             raise HTTPException(
                 status_code=409,
-                detail="An active council deliberation is already in progress. Please wait for it to complete.",
+                detail=f"An active council deliberation (Job ID: {aj.id}) is already in progress. Please wait for it to complete or cancel it.",
             )
     db.commit()
 
@@ -477,7 +535,7 @@ def create_deliberation_job(
         user_settings=user_settings,
         local_only_mode=request.local_only_mode,
     )
-    initial_progress = {p.name: "Pending" for p in providers} if providers else {"system": "Skipped"}
+    initial_progress = {p.name: "Pending" for p in providers} if providers else {"system": "Not Configured"}
 
     # 4. Create persistent DB CouncilJob record
     db_job = CouncilJob(
@@ -524,7 +582,7 @@ def create_deliberation_job(
         "error": None,
     }
 
-    # 7. Launch background task (via BackgroundTasks or asyncio.create_task)
+    # 7. Launch background task
     if background_tasks is not None:
         background_tasks.add_task(
             _run_deliberation_task,
@@ -568,7 +626,7 @@ def get_deliberation_job_status(
     """
     Retrieves the status of a running or completed deliberation job.
     Queries the database by job_id and user_id to strictly enforce ownership.
-    Enforces 3-minute timeout on hanging jobs and returns fresh progress.
+    Enforces maximum lifetime timeout on hanging jobs and returns fresh progress.
     """
     # 1. Query CouncilJob by job_id and user_id
     job = db.query(CouncilJob).filter(
@@ -584,10 +642,10 @@ def get_deliberation_job_status(
     if c_at.tzinfo is None:
         c_at = c_at.replace(tzinfo=timezone.utc)
 
-    # 2. Check 3-minute max lifetime
-    if job.status in ("pending", "running") and (now - c_at).total_seconds() > 180:
+    # 2. Check max lifetime (5 minutes)
+    if job.status in ("pending", "running") and (now - c_at).total_seconds() > settings.COUNCIL_JOB_TIMEOUT_SECONDS:
         job.status = "failed"
-        job.error = "Deliberation timed out after 3 minutes."
+        job.error = f"Deliberation timed out after {settings.COUNCIL_JOB_TIMEOUT_SECONDS // 60} minutes."
         job.updated_at = now
         db.commit()
 
@@ -621,6 +679,405 @@ def get_deliberation_job_status(
         decision=decision_out,
         error=job.error,
     )
+
+
+def cancel_deliberation_job(
+    db: Session,
+    user_id: str,
+    job_id: str,
+) -> CouncilJobStatus:
+    """
+    Cancels a pending or running deliberation job and frees the user's active-job slot.
+    Checks auth/ownership (404 if not found).
+    """
+    job = db.query(CouncilJob).filter(
+        CouncilJob.id == job_id,
+        CouncilJob.user_id == user_id,
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Council deliberation job not found.")
+
+    now = datetime.now(timezone.utc)
+    if job.status in ("pending", "running"):
+        job.status = "cancelled"
+        job.error = "Deliberation cancelled by user."
+        job.updated_at = now
+
+        # Also cancel corresponding decision if running
+        decision_id = job.decision_id or job.id
+        decision = db.query(CouncilDecision).filter(
+            CouncilDecision.id == decision_id,
+            CouncilDecision.user_id == user_id,
+        ).first()
+        if decision and decision.status == "running":
+            decision.status = "cancelled"
+
+        db.commit()
+
+    if job_id in _DELIBERATION_JOBS:
+        _DELIBERATION_JOBS[job_id]["status"] = "cancelled"
+        _DELIBERATION_JOBS[job_id]["error"] = "Deliberation cancelled by user."
+
+    providers_progress = job.providers_progress or {}
+    if job_id in _DELIBERATION_JOBS and _DELIBERATION_JOBS[job_id].get("providers_progress"):
+        providers_progress = _DELIBERATION_JOBS[job_id]["providers_progress"]
+
+    return CouncilJobStatus(
+        job_id=job.id,
+        status=job.status,
+        current_round=job.current_round,
+        total_rounds=job.total_rounds,
+        providers_progress=providers_progress,
+        decision=None,
+        error=job.error,
+    )
+
+
+def create_retry_job(
+    db: Session,
+    user: User,
+    decision_id: str,
+    background_tasks: Optional[BackgroundTasks] = None,
+) -> CouncilJobStatus:
+    """
+    Creates an asynchronous background retry job for failed providers:
+    - Verifies ownership of decision_id (404 if not found or unauthorized).
+    - Enforces 1 active job per user rule (409 Conflict if active job already running).
+    - Re-queries ONLY providers that failed, timed out, or had no verdict.
+    - Preserves successful votes, records provider quota, and updates consensus.
+    """
+    decision = db.query(CouncilDecision).filter(
+        CouncilDecision.id == decision_id,
+        CouncilDecision.user_id == user.id,
+    ).first()
+    if not decision:
+        raise HTTPException(status_code=404, detail="Council decision not found.")
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=settings.COUNCIL_JOB_TIMEOUT_SECONDS)
+
+    # Enforce 1 active job per user rule
+    active_jobs = db.query(CouncilJob).filter(
+        CouncilJob.user_id == user.id,
+        CouncilJob.status.in_(["pending", "running"]),
+    ).all()
+
+    for aj in active_jobs:
+        c_at = aj.created_at
+        if c_at.tzinfo is None:
+            c_at = c_at.replace(tzinfo=timezone.utc)
+        if c_at < cutoff:
+            aj.status = "failed"
+            aj.error = f"Deliberation timed out after {settings.COUNCIL_JOB_TIMEOUT_SECONDS // 60} minutes."
+            aj.updated_at = now
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail=f"An active council deliberation (Job ID: {aj.id}) is already in progress. Please wait for it to complete or cancel it.",
+            )
+    db.commit()
+
+    user_settings = user.settings or {}
+    all_providers = get_configured_providers(
+        user_settings=user_settings,
+        local_only_mode=decision.local_only_mode,
+    )
+    r1_votes_raw = decision.round1_votes or {}
+
+    initial_progress: Dict[str, str] = {}
+    for p in all_providers:
+        v_data = r1_votes_raw.get(p.name)
+        if not v_data or v_data.get("status") != "success" or not v_data.get("verdict"):
+            initial_progress[p.name] = "Pending Retry"
+        else:
+            initial_progress[p.name] = "Vote Preserved"
+
+    if not initial_progress:
+        initial_progress = {"system": "No failed providers"}
+
+    job_id = str(uuid.uuid4())
+    total_rounds = 2 if decision.enable_debate else 1
+
+    db_job = CouncilJob(
+        id=job_id,
+        user_id=user.id,
+        decision_id=decision.id,
+        status="running",
+        current_round=1,
+        total_rounds=total_rounds,
+        providers_progress=initial_progress,
+        error=None,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(db_job)
+    decision.status = "running"
+    db.commit()
+
+    _DELIBERATION_JOBS[job_id] = {
+        "job_id": job_id,
+        "user_id": user.id,
+        "decision_id": decision.id,
+        "status": "running",
+        "current_round": 1,
+        "total_rounds": total_rounds,
+        "providers_progress": initial_progress,
+        "decision": None,
+        "error": None,
+    }
+
+    if background_tasks is not None:
+        background_tasks.add_task(
+            _run_retry_task,
+            job_id=job_id,
+            user_id=user.id,
+            decision_id=decision.id,
+            currency=user.currency,
+            user_settings=user_settings,
+        )
+    else:
+        asyncio.create_task(
+            _run_retry_task(
+                job_id=job_id,
+                user_id=user.id,
+                decision_id=decision.id,
+                currency=user.currency,
+                user_settings=user_settings,
+            )
+        )
+
+    return CouncilJobStatus(
+        job_id=job_id,
+        status="running",
+        current_round=1,
+        total_rounds=total_rounds,
+        providers_progress=initial_progress,
+        decision=None,
+        error=None,
+    )
+
+
+async def _run_retry_task(
+    job_id: str,
+    user_id: str,
+    decision_id: str,
+    currency: str,
+    user_settings: Dict[str, Any],
+) -> None:
+    db = SessionLocal()
+    try:
+        decision = db.query(CouncilDecision).filter(
+            CouncilDecision.id == decision_id,
+            CouncilDecision.user_id == user_id,
+        ).first()
+        if not decision:
+            return
+
+        min_quorum = int(user_settings.get("min_quorum_votes", settings.COUNCIL_MIN_QUORUM_VOTES))
+        r1_votes_raw = decision.round1_votes or {}
+        all_providers = get_configured_providers(
+            user_settings=user_settings,
+            local_only_mode=decision.local_only_mode,
+        )
+
+        failed_adapters: List[BaseProviderAdapter] = []
+        for p in all_providers:
+            v_data = r1_votes_raw.get(p.name)
+            if not v_data or v_data.get("status") != "success" or not v_data.get("verdict"):
+                failed_adapters.append(p)
+
+        snapshot = decision.financial_snapshot or {}
+        has_sufficient = snapshot.get("has_sufficient_data", True)
+        anonymized_context = build_anonymized_council_context(snapshot, currency)
+        amt_line = f"PROPOSED AMOUNT: {currency} {float(decision.candidate_amount):,.2f}\n\n" if decision.candidate_amount else ""
+        round1_prompt = (
+            f"{anonymized_context}\n\n"
+            f"USER DECISION / INQUIRY:\n\"{decision.question}\"\n"
+            f"DECISION TYPE: {decision.decision_type.upper()}\n"
+            f"{amt_line}"
+            f"Please independently evaluate this decision and return your strict JSON vote."
+        )
+
+        async def query_with_progress(p: BaseProviderAdapter, prompt: str, sys_inst: str, r_num: int) -> IndividualVote:
+            # 1. Check circuit breaker
+            tripped, trip_reason, trip_secs = is_circuit_breaker_active(db, p.name)
+            if tripped:
+                if job_id in _DELIBERATION_JOBS:
+                    _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Temporarily skipped ({trip_reason})"
+                return IndividualVote(
+                    provider_name=p.name,
+                    display_name=p.display_name,
+                    model_id=p.model_id,
+                    model_family=p.model_family,
+                    status="skipped",
+                    round_number=r_num,
+                    error_message=f"Temporarily skipped: Circuit breaker tripped ({trip_reason}). Resets in {trip_secs}s.",
+                )
+
+            if job_id in _DELIBERATION_JOBS:
+                _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} retrying..."
+            try:
+                res = await p.query(
+                    prompt=prompt,
+                    system_instruction=sys_inst,
+                    timeout_seconds=p.timeout_seconds,
+                    round_number=r_num,
+                )
+                if not has_sufficient and res.confidence is not None and res.confidence > 40:
+                    res.confidence = 40
+                if job_id in _DELIBERATION_JOBS:
+                    status_text = "voted" if res.status == "success" else res.status
+                    _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} {status_text}"
+                
+                # Record health status
+                if res.status == "success":
+                    record_provider_success(db, p.name)
+                elif res.status == "rate_limited":
+                    r_secs = None
+                    if res.error_message:
+                        m = re.search(r'Retry in (\d+) seconds', res.error_message)
+                        if m:
+                            r_secs = int(m.group(1))
+                    record_provider_failure(db, p.name, res.status, retry_after_seconds=r_secs)
+                elif res.status in ("timeout", "failed", "error"):
+                    record_provider_failure(db, p.name, res.status)
+
+                return res
+            except Exception as ex:
+                if job_id in _DELIBERATION_JOBS:
+                    _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = f"Round {r_num} failed"
+                record_provider_failure(db, p.name, "exception")
+                return IndividualVote(
+                    provider_name=p.name,
+                    display_name=p.display_name,
+                    model_id=p.model_id,
+                    model_family=p.model_family,
+                    status="failed",
+                    round_number=r_num,
+                    error_message=redact_sensitive_info(str(ex)),
+                )
+
+        if failed_adapters:
+            round1_tasks = [
+                query_with_progress(p, round1_prompt, SYSTEM_INSTRUCTION_ROUND1, 1)
+                for p in failed_adapters
+            ]
+            retry_results: List[IndividualVote] = await asyncio.gather(*round1_tasks)
+            _record_provider_usage(db, retry_results)
+
+            merged_r1_map = dict(r1_votes_raw)
+            for v in retry_results:
+                merged_r1_map[v.provider_name] = v.model_dump(mode="json")
+            decision.round1_votes = merged_r1_map
+        else:
+            merged_r1_map = dict(r1_votes_raw)
+
+        all_r1_objs = [IndividualVote.model_validate(v) for v in merged_r1_map.values()]
+        successful_r1 = [v for v in all_r1_objs if v.status == "success" and v.verdict]
+        effective_votes = all_r1_objs
+
+        if decision.enable_debate and len(successful_r1) >= 2:
+            if job_id in _DELIBERATION_JOBS:
+                _DELIBERATION_JOBS[job_id]["current_round"] = 2
+            try:
+                db_job = db.query(CouncilJob).filter(CouncilJob.id == job_id).first()
+                if db_job:
+                    db_job.current_round = 2
+                    db_job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            except Exception:
+                pass
+
+            peer_lines = ["PEER COUNCIL MEMBER ROUND 1 POSITIONS:"]
+            for v in successful_r1:
+                name_label = v.display_name or v.provider_name
+                peer_lines.append(
+                    f"- {name_label} ({v.model_family}): Voted {v.verdict.upper()} (Confidence: {v.confidence}%) | "
+                    f"Reasoning: {v.reasoning} | Identified Risks: {', '.join(v.risks)}"
+                )
+            peer_summary = "\n".join(peer_lines)
+            round2_prompt = (
+                f"{round1_prompt}\n\n"
+                f"{peer_summary}\n\n"
+                f"Review your peers' perspectives above. Provide your final Round 2 vote in strict JSON format."
+            )
+            round2_tasks = [
+                query_with_progress(p, round2_prompt, SYSTEM_INSTRUCTION_ROUND2, 2)
+                for p in all_providers
+            ]
+            round2_results: List[IndividualVote] = await asyncio.gather(*round2_tasks)
+            decision.round2_votes = {v.provider_name: v.model_dump(mode="json") for v in round2_results}
+            effective_votes = round2_results
+            _record_provider_usage(db, round2_results)
+
+        final_tally = _calculate_tally(effective_votes, min_quorum=min_quorum)
+        decision.final_tally = final_tally.model_dump(mode="json")
+        decision.status = "completed"
+        db.commit()
+        db.refresh(decision)
+        decision_out = CouncilDecisionOut.model_validate(decision)
+
+        db_job = db.query(CouncilJob).filter(CouncilJob.id == job_id).first()
+        if db_job:
+            db_job.status = "completed"
+            db_job.decision_id = decision.id
+            if job_id in _DELIBERATION_JOBS:
+                db_job.providers_progress = _DELIBERATION_JOBS[job_id]["providers_progress"]
+            db_job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+
+        if job_id in _DELIBERATION_JOBS:
+            _DELIBERATION_JOBS[job_id]["status"] = "completed"
+            _DELIBERATION_JOBS[job_id]["decision"] = decision_out
+
+    except Exception as e:
+        clean_error = redact_sensitive_info(str(e))
+        if job_id in _DELIBERATION_JOBS:
+            _DELIBERATION_JOBS[job_id]["status"] = "failed"
+            _DELIBERATION_JOBS[job_id]["error"] = clean_error
+        try:
+            db_job = db.query(CouncilJob).filter(CouncilJob.id == job_id).first()
+            if db_job:
+                db_job.status = "failed"
+                db_job.error = clean_error
+                db_job.updated_at = datetime.now(timezone.utc)
+                db.commit()
+            decision = db.query(CouncilDecision).filter(CouncilDecision.id == decision_id).first()
+            if decision:
+                decision.status = "completed"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+async def retry_failed_providers_for_decision(
+    db: Session,
+    user: User,
+    decision_id: str,
+) -> CouncilDecisionOut:
+    """
+    Synchronous / direct helper for retrying failed providers, awaiting completion.
+    """
+    job_status = create_retry_job(db=db, user=user, decision_id=decision_id)
+    job_id = job_status.job_id
+
+    while True:
+        await asyncio.sleep(0.1)
+        st = get_deliberation_job_status(db=db, user_id=user.id, job_id=job_id)
+        if not st or st.status in ("completed", "failed"):
+            if st and st.decision:
+                return st.decision
+            decision = (
+                db.query(CouncilDecision)
+                .filter(CouncilDecision.id == decision_id, CouncilDecision.user_id == user.id)
+                .first()
+            )
+            if decision:
+                return CouncilDecisionOut.model_validate(decision)
+            raise RuntimeError(f"Retry failed: {st.error if st else 'Unknown error'}")
 
 
 async def execute_council_deliberation(

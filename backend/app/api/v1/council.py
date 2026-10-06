@@ -23,8 +23,15 @@ from app.schemas.council import (
 )
 from app.services.council.engine import (
     create_deliberation_job,
+    create_retry_job,
+    cancel_deliberation_job,
     get_deliberation_job_status,
     execute_council_deliberation,
+    retry_failed_providers_for_decision,
+)
+from app.services.council.health_manager import (
+    is_circuit_breaker_active,
+    reset_circuit_breaker,
 )
 from app.services.council.connection_tester import verify_provider_connectivity
 from app.services.financial_math import calculate_user_financial_snapshot
@@ -158,6 +165,10 @@ async def list_council_providers(
         limit = d["daily_quota_limit"]
         is_near_limit = bool(limit and req_count >= (limit * 0.8))
 
+        cb_tripped, cb_reason, cb_secs = is_circuit_breaker_active(db, d["name"])
+        if cb_tripped:
+            status_val = "circuit_breaker_tripped"
+
         providers_info.append(
             ProviderStatusItem(
                 name=d["name"],
@@ -171,6 +182,9 @@ async def list_council_providers(
                 is_near_limit=is_near_limit,
                 shares_key_with=d["shares_key_with"],
                 status=status_val,
+                circuit_breaker_tripped=cb_tripped,
+                circuit_breaker_reason=cb_reason,
+                circuit_breaker_resets_in_seconds=cb_secs,
             )
         )
 
@@ -178,11 +192,12 @@ async def list_council_providers(
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse, dependencies=[Depends(verify_csrf)])
-@limiter.limit("10/minute")
+@limiter.limit("20/minute")
 async def test_council_provider_connection(
     request: Request,
     payload: TestConnectionRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Tests a configured AI Council provider connection:
@@ -190,13 +205,14 @@ async def test_council_provider_connection(
     - Measures roundtrip latency in ms
     - Verifies HTTP status and diagnoses errors (invalid key, model not found, rate limited, timeout, bad JSON)
     - Queries the provider's /models catalog and verifies if model_id is found, offering close matches if not.
-    - Rate limited to 10 tests/minute.
+    - Rate limited to 20 tests/minute.
     - Requires Authentication & CSRF. Never returns or logs API keys.
     """
     res = await verify_provider_connectivity(
         provider_name=payload.provider_name,
         model_id=payload.model_id,
         user_settings=current_user.settings or {},
+        db=db,
     )
     return res
 
@@ -244,8 +260,10 @@ async def preview_council_prompt(
 
 
 @router.post("/ask", response_model=CouncilJobStatus, dependencies=[Depends(verify_csrf)])
+@limiter.limit("5/minute")
 async def ask_council(
-    request: AskCouncilRequest,
+    request: Request,
+    payload: AskCouncilRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -254,7 +272,7 @@ async def ask_council(
     Submits a financial question for multi-AI Council deliberation as a background job.
     Returns immediately with a job ID and initial status for frontend polling and persistence.
     """
-    job = create_deliberation_job(db=db, user=current_user, request=request, background_tasks=background_tasks)
+    job = create_deliberation_job(db=db, user=current_user, request=payload, background_tasks=background_tasks)
     return job
 
 
@@ -335,3 +353,59 @@ async def record_user_decision(
     db.commit()
     db.refresh(decision)
     return decision
+
+
+@router.post("/decision/{decision_id}/retry-failed", response_model=CouncilJobStatus, dependencies=[Depends(verify_csrf)])
+@limiter.limit("5/minute")
+async def retry_failed_council_providers(
+    request: Request,
+    decision_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Re-queries only the failed, timed-out, or unavailable AI providers for an existing deliberation
+    as an asynchronous background job.
+    Enforces 1 active job per user, ownership check (404), rate limit, records quota usage,
+    and returns CouncilJobStatus for client polling.
+    """
+    job_status = create_retry_job(
+        db=db,
+        user=current_user,
+        decision_id=decision_id,
+        background_tasks=background_tasks,
+    )
+    return job_status
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=CouncilJobStatus, dependencies=[Depends(verify_csrf)])
+async def cancel_council_deliberation_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Cancels an active or pending council deliberation job and frees the user's active job slot.
+    Requires authentication, CSRF, and user ownership check.
+    """
+    return cancel_deliberation_job(db=db, user_id=current_user.id, job_id=job_id)
+
+
+@router.post("/providers/{provider_name}/reset-circuit-breaker", dependencies=[Depends(verify_csrf)])
+async def reset_provider_circuit_breaker(
+    provider_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually resets a tripped circuit breaker for a provider ('Retry now' action).
+    Requires authentication and CSRF.
+    """
+    reset_circuit_breaker(db, provider_name)
+    return {
+        "status": "ok",
+        "provider_name": provider_name,
+        "message": f"Circuit breaker for provider '{provider_name}' has been reset.",
+    }
+

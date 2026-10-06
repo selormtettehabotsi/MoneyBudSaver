@@ -79,3 +79,34 @@ class CouncilCache(Base):
     response_payload = Column(JSON, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ProviderCircuitBreaker(Base):
+    __tablename__ = "provider_circuit_breakers"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_name = Column(String(50), unique=True, index=True, nullable=False)
+    consecutive_failures = Column(Integer, default=0, nullable=False)
+    last_failure_reason = Column(Text, nullable=True)
+    last_failure_at = Column(DateTime(timezone=True), nullable=True)
+    is_tripped = Column(Boolean, default=False, nullable=False)
+    tripped_until = Column(DateTime(timezone=True), nullable=True)
+    last_test_result = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ProviderParamFallback(Base):
+    __tablename__ = "provider_param_fallbacks"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_name = Column(String(50), nullable=False, index=True)
+    model_id = Column(String(150), nullable=False, index=True)
+    thinking_supported = Column(Boolean, default=False, nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider_name", "model_id", name="uq_provider_model_param_fallback"),
+    )
+

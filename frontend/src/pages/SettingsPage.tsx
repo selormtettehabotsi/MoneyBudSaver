@@ -28,6 +28,9 @@ import {
   Key,
   Eye,
   EyeOff,
+  Copy,
+  ExternalLink,
+  Timer,
 } from "lucide-react";
 import {
   downloadTransactionsCsv,
@@ -265,8 +268,8 @@ export const SettingsPage: React.FC = () => {
     { key: "groq", name: "Groq GPT-OSS", family: "OpenAI / GPT-OSS Family", defaultModel: "openai/gpt-oss-120b", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free Tier)" },
     { key: "mistral", name: "Mistral AI", family: "Mistral Family", defaultModel: "mistral-small-latest", icon: <Shield size={16} />, status: "Active (European Free Tier)" },
     { key: "openrouter", name: "OpenRouter Qwen", family: "Qwen Family", defaultModel: "qwen/qwen3.8-27b:free", icon: <Globe size={16} />, status: "Active (Free Tier)" },
-    { key: "nvidia", name: "NVIDIA NIM GLM", family: "Zhipu GLM", defaultModel: "z-ai/glm-5.3-flash", icon: <Cpu size={16} />, status: "Active (Free Tier - 40 RPM)" },
-    { key: "nvidia_kimi", name: "NVIDIA NIM Kimi", family: "Moonshot Kimi", defaultModel: "moonshotai/kimi-k3", icon: <Cpu size={16} />, status: "Optional (Shared NIM Key)" },
+    { key: "nvidia", name: "NVIDIA GLM", family: "Zhipu GLM", defaultModel: "z-ai/glm-5.3-flash", icon: <Cpu size={16} />, status: "Active (Free Tier - 40 RPM)" },
+    { key: "nvidia_kimi", name: "Kimi (NVIDIA)", family: "Moonshot Kimi", defaultModel: "moonshotai/kimi-k3", icon: <Cpu size={16} />, status: "Optional (Shared NIM Key)" },
     { key: "cerebras", name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Optional (Paid / Trial Only)" },
     { key: "ollama", name: "Ollama (Local Offline)", family: "Self-Hosted Private", defaultModel: "llama3.2", icon: <Server size={16} />, status: isHosted ? "Disabled in Hosted Mode" : "Local / Offline Only" },
   ];
@@ -1121,7 +1124,7 @@ export const SettingsPage: React.FC = () => {
                       fontSize: "12px",
                       display: "flex",
                       flexDirection: "column",
-                      gap: "6px",
+                      gap: "8px",
                     }}
                   >
                     <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "6px" }}>
@@ -1143,18 +1146,61 @@ export const SettingsPage: React.FC = () => {
                             HTTP {res.http_status}
                           </span>
                         )}
+                        {res.catalog_ok !== undefined && (
+                          <span className={`badge ${res.catalog_ok ? "badge-info" : "badge-secondary"}`} style={{ fontSize: "10px" }}>
+                            Catalog: {res.catalog_ok ? "OK" : "Failed"}
+                          </span>
+                        )}
+                        {res.chat_status && (
+                          <span className={`badge ${res.chat_status === "success" ? "badge-success" : "badge-warning"}`} style={{ fontSize: "10px" }}>
+                            Chat: {res.chat_status}
+                          </span>
+                        )}
                       </div>
 
-                      {res.latency_ms > 0 && (
-                        <span style={{ color: "var(--text-muted)", fontSize: "11px" }}>
-                          Latency: <strong>{res.latency_ms} ms</strong>
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                        {res.ttft_ms !== null && res.ttft_ms !== undefined && (
+                          <span className="flex items-center gap-1" title="Time to first token">
+                            <Timer size={11} />
+                            <span>TTFT: <strong>{res.ttft_ms}ms</strong></span>
+                          </span>
+                        )}
+                        {res.latency_ms > 0 && (
+                          <span>Total: <strong>{res.latency_ms}ms</strong></span>
+                        )}
+                      </div>
                     </div>
 
                     <div style={{ color: "var(--text-primary)", lineHeight: "1.4" }}>
                       {res.diagnosis}
                     </div>
+
+                    {/* Rate Limit Retry-After Warning */}
+                    {res.retry_after_seconds && (
+                      <div className="badge-warning flex items-center gap-1.5" style={{ padding: "6px 10px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
+                        <AlertCircle size={13} />
+                        <span>Rate limited. Recommended retry in <strong>{res.retry_after_seconds} seconds</strong>.</span>
+                      </div>
+                    )}
+
+                    {/* OpenRouter Privacy Hint */}
+                    {res.privacy_hint && (
+                      <div className="badge-warning flex items-start gap-1.5" style={{ padding: "8px 10px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
+                        <Info size={13} style={{ flexShrink: 0, marginTop: "2px" }} />
+                        <div>
+                          <span>{res.privacy_hint}</span>{" "}
+                          <a
+                            href="https://openrouter.ai/settings/privacy"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ textDecoration: "underline", color: "var(--accent-primary)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "2px" }}
+                          >
+                            <span>OpenRouter Privacy Settings</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Catalog Listing Status */}
                     {res.model_found_in_list === true && (
@@ -1175,6 +1221,34 @@ export const SettingsPage: React.FC = () => {
                             </span>
                           )}
                         </span>
+                      </div>
+                    )}
+
+                    {/* OpenRouter Free Models List with One-Click Copy */}
+                    {res.free_models && res.free_models.length > 0 && (
+                      <div style={{ marginTop: "4px", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "6px" }}>
+                          Available Free Models ({res.free_models.length} with zero prompt/completion price):
+                        </div>
+                        <div className="flex flex-wrap gap-1.5" style={{ maxHeight: "140px", overflowY: "auto" }}>
+                          {res.free_models.map((mId) => (
+                            <button
+                              key={mId}
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(mId);
+                                alert(`Copied model ID to clipboard:\n${mId}`);
+                              }}
+                              className="btn btn-secondary btn-sm flex items-center gap-1"
+                              style={{ padding: "3px 7px", fontSize: "10px", minHeight: "26px" }}
+                              title="Click to copy Model ID"
+                            >
+                              <Copy size={10} />
+                              <code>{mId}</code>
+                              <span className="badge badge-success" style={{ fontSize: "8px", padding: "1px 3px" }}>Free</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

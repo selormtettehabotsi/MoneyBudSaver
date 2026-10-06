@@ -10,6 +10,8 @@ import {
   ChevronDown,
   ChevronUp,
   AlertOctagon,
+  AlertCircle,
+  Timer,
 } from "lucide-react";
 
 interface CouncilVoteCardProps {
@@ -26,6 +28,7 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
 
   const isSuccess = vote.status === "success";
   const verdict = vote.verdict;
+  const displayName = vote.display_name || vote.provider_name;
 
   const verdictBadge = () => {
     if (vote.status === "skipped" || vote.status === "missing_key" || vote.status === "not_configured") {
@@ -33,6 +36,38 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
         <span className="badge badge-secondary flex items-center gap-1" style={{ opacity: 0.8 }}>
           <Clock size={13} />
           <span>NOT CONFIGURED</span>
+        </span>
+      );
+    }
+    if (vote.status === "timeout") {
+      return (
+        <span className="badge badge-warning flex items-center gap-1">
+          <Clock size={13} />
+          <span>TIMEOUT</span>
+        </span>
+      );
+    }
+    if (vote.status === "rate_limited") {
+      return (
+        <span className="badge badge-warning flex items-center gap-1">
+          <AlertTriangle size={13} />
+          <span>RATE LIMITED</span>
+        </span>
+      );
+    }
+    if (vote.status === "invalid_key") {
+      return (
+        <span className="badge badge-danger flex items-center gap-1">
+          <XCircle size={13} />
+          <span>INVALID KEY</span>
+        </span>
+      );
+    }
+    if (vote.status === "model_not_found") {
+      return (
+        <span className="badge badge-danger flex items-center gap-1">
+          <AlertCircle size={13} />
+          <span>MODEL NOT FOUND</span>
         </span>
       );
     }
@@ -46,9 +81,9 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
     }
     if (!isSuccess) {
       return (
-        <span className="badge badge-secondary flex items-center gap-1">
-          <Clock size={13} />
-          <span>{vote.status.replace("_", " ").toUpperCase()}</span>
+        <span className="badge badge-danger flex items-center gap-1">
+          <XCircle size={13} />
+          <span>FAILED</span>
         </span>
       );
     }
@@ -117,8 +152,15 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
               <Cpu size={16} />
             </div>
             <div>
-              <h4 style={{ fontSize: "14px", fontWeight: 700 }}>{vote.provider_name}</h4>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{vote.model_family}</span>
+              <h4 style={{ fontSize: "14px", fontWeight: 700 }}>{displayName}</h4>
+              <div className="flex items-center gap-2" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                <span>{vote.model_family}</span>
+                {vote.latency_ms !== null && vote.latency_ms !== undefined && vote.latency_ms > 0 && (
+                  <span className="flex items-center gap-0.5" style={{ color: "var(--text-secondary)" }}>
+                    • <Timer size={11} /> {vote.latency_ms >= 1000 ? `${(vote.latency_ms / 1000).toFixed(1)}s` : `${vote.latency_ms}ms`}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
