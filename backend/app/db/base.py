@@ -12,6 +12,7 @@ from app.models import (
     CouncilDecision,
     ProviderQuota,
     CouncilCache,
+    CouncilJob,
     SuggestionLog,
 )
 

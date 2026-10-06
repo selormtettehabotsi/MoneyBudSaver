@@ -204,3 +204,74 @@ def test_production_config_validation():
             CRON_SECRET="dev_cron_secret_123_change_in_production",
         )
         cfg.validate_production_readiness()
+
+
+def test_change_password_success_and_invalidation(make_auth_client):
+    client, user = make_auth_client("pwd_user@example.com", "OldPassword12345!")
+
+    # 1. Change password successfully
+    res = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "OldPassword12345!", "new_password": "NewSecurePassword123!"},
+    )
+    assert res.status_code == 200
+    assert "Password changed successfully" in res.json()["message"]
+
+    # 2. Login with old password must now fail
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "pwd_user@example.com", "password": "OldPassword12345!"},
+    )
+    assert old_login.status_code == 401
+
+    # 3. Login with new password must succeed
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "pwd_user@example.com", "password": "NewSecurePassword123!"},
+    )
+    assert new_login.status_code == 200
+    assert new_login.json()["email"] == "pwd_user@example.com"
+
+
+def test_change_password_wrong_current_password(make_auth_client):
+    client, user = make_auth_client("pwd_wrong@example.com", "CorrectPassword123!")
+
+    res = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "IncorrectPassword123!", "new_password": "NewPassword123456!"},
+    )
+    assert res.status_code == 400
+    assert "Incorrect current password" in res.json()["detail"]
+
+
+def test_change_password_weak_or_oversized_password(make_auth_client):
+    client, user = make_auth_client("pwd_weak@example.com", "OldPassword12345!")
+
+    # Less than 12 chars
+    short_res = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "OldPassword12345!", "new_password": "Short123!"},
+    )
+    assert short_res.status_code == 422
+
+    # Over 72 bytes
+    long_res = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "OldPassword12345!", "new_password": "A" * 73},
+    )
+    assert long_res.status_code == 422
+
+
+def test_change_password_rate_limiting(make_auth_client):
+    client, user = make_auth_client("pwd_rate@example.com", "OldPassword12345!")
+
+    statuses = []
+    for _ in range(7):
+        res = client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "WrongPassword", "new_password": "NewPassword123456!"},
+        )
+        statuses.append(res.status_code)
+
+    # At least one request should be 429 Too Many Requests
+    assert 429 in statuses

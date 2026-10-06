@@ -58,21 +58,25 @@ class Settings(BaseSettings):
     DEFAULT_MIN_RUNWAY_MONTHS: float = 3.0
     DEFAULT_CURRENCY: str = "GHS"
 
-    # Provider API Keys & Model IDs (at least 4 different model families)
+    # Provider API Keys & Model IDs (at least 5 different model families)
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL_ID: str = "gemini-2.5-flash"
+    GEMINI_MODEL_ID: str = "gemini-3.8-flash"
 
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL_ID: str = "openai/gpt-oss-120b"
-
-    CEREBRAS_API_KEY: Optional[str] = None
-    CEREBRAS_MODEL_ID: str = "llama3.3-70b"
 
     MISTRAL_API_KEY: Optional[str] = None
     MISTRAL_MODEL_ID: str = "mistral-small-latest"
 
     OPENROUTER_API_KEY: Optional[str] = None
-    OPENROUTER_MODEL_ID: str = "qwen/qwen-2.5-72b-instruct:free"
+    OPENROUTER_MODEL_ID: str = "qwen/qwen3.8-27b:free"
+
+    NVIDIA_API_KEY: Optional[str] = None
+    NVIDIA_MODEL_ID: str = "z-ai/glm-5.3-flash"
+    NVIDIA_KIMI_MODEL_ID: Optional[str] = "moonshotai/kimi-k3"
+
+    CEREBRAS_API_KEY: Optional[str] = None
+    CEREBRAS_MODEL_ID: str = "llama3.3-70b"
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_ID: str = "llama3.2"

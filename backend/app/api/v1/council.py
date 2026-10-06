@@ -1,9 +1,10 @@
 """
-AI Council API Endpoints for deliberation requests, provider status, history, and user final say.
+AI Council API Endpoints for deliberation requests, background job polling,
+provider connection testing, provider status, history, and user final say.
 """
 from datetime import datetime, timezone
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -14,11 +15,18 @@ from app.models.council import CouncilDecision
 from app.schemas.council import (
     AskCouncilRequest,
     CouncilDecisionOut,
+    CouncilJobStatus,
+    TestConnectionRequest,
+    TestConnectionResponse,
     UserDecisionSubmit,
     ProviderStatusItem,
 )
-from app.services.council.engine import execute_council_deliberation
-from app.services.council.adapters_factory import get_configured_providers
+from app.services.council.engine import (
+    create_deliberation_job,
+    get_deliberation_job_status,
+    execute_council_deliberation,
+)
+from app.services.council.connection_tester import verify_provider_connectivity
 from app.services.financial_math import calculate_user_financial_snapshot
 from app.services.privacy import scrub_pii_from_text, build_anonymized_council_context
 
@@ -26,76 +34,171 @@ router = APIRouter(prefix="/council", tags=["AI Council"])
 
 
 @router.get("/providers", response_model=List[ProviderStatusItem])
-async def list_council_providers(current_user: User = Depends(get_current_user)):
+async def list_council_providers(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Returns the configuration status and model family details for all AI Council providers."""
+    from datetime import date
+    from app.models.council import ProviderQuota
+    
     is_hosted = settings.is_hosted
     user_settings = current_user.settings or {}
     custom_models = user_settings.get("custom_model_ids", {})
 
-    providers_info = [
+    # Fetch today's quotas from DB
+    today = date.today()
+    quotas_db = db.query(ProviderQuota).filter(ProviderQuota.date == today).all()
+    quota_map = {q.provider_name: q.request_count for q in quotas_db}
+
+    # Provider definitions with daily limits
+    defs = [
         {
             "name": "gemini",
             "display_name": "Google Gemini",
             "model_family": "Google Gemini Family",
             "model_id": custom_models.get("gemini", settings.GEMINI_MODEL_ID),
-            "is_configured": bool(settings.GEMINI_API_KEY),
+            "has_key": bool(settings.GEMINI_API_KEY),
             "is_local": False,
-            "daily_request_count": 0,
-            "status": "ready" if settings.GEMINI_API_KEY else "missing_key",
+            "daily_quota_limit": 1500,
+            "shares_key_with": None,
         },
         {
             "name": "groq",
             "display_name": "Groq GPT-OSS",
             "model_family": "OpenAI / GPT-OSS Family",
             "model_id": custom_models.get("groq", settings.GROQ_MODEL_ID),
-            "is_configured": bool(settings.GROQ_API_KEY),
+            "has_key": bool(settings.GROQ_API_KEY),
             "is_local": False,
-            "daily_request_count": 0,
-            "status": "ready" if settings.GROQ_API_KEY else "missing_key",
-        },
-        {
-            "name": "cerebras",
-            "display_name": "Cerebras Llama (Paid/Trial)",
-            "model_family": "Meta Llama Family",
-            "model_id": custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
-            "is_configured": bool(settings.CEREBRAS_API_KEY),
-            "is_local": False,
-            "daily_request_count": 0,
-            "status": "ready" if settings.CEREBRAS_API_KEY else "missing_key",
+            "daily_quota_limit": 14400,
+            "shares_key_with": None,
         },
         {
             "name": "mistral",
             "display_name": "Mistral AI",
             "model_family": "Mistral Family",
             "model_id": custom_models.get("mistral", settings.MISTRAL_MODEL_ID),
-            "is_configured": bool(settings.MISTRAL_API_KEY),
+            "has_key": bool(settings.MISTRAL_API_KEY),
             "is_local": False,
-            "daily_request_count": 0,
-            "status": "ready" if settings.MISTRAL_API_KEY else "missing_key",
+            "daily_quota_limit": 1000,
+            "shares_key_with": None,
         },
         {
             "name": "openrouter",
             "display_name": "OpenRouter Qwen",
             "model_family": "Qwen Family",
             "model_id": custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID),
-            "is_configured": bool(settings.OPENROUTER_API_KEY),
+            "has_key": bool(settings.OPENROUTER_API_KEY),
             "is_local": False,
-            "daily_request_count": 0,
-            "status": "ready" if settings.OPENROUTER_API_KEY else "missing_key",
+            "daily_quota_limit": 200,
+            "shares_key_with": None,
+        },
+        {
+            "name": "nvidia",
+            "display_name": "NVIDIA NIM (GLM)",
+            "model_family": "Zhipu GLM",
+            "model_id": custom_models.get("nvidia", settings.NVIDIA_MODEL_ID),
+            "has_key": bool(settings.NVIDIA_API_KEY),
+            "is_local": False,
+            "daily_quota_limit": 1000,
+            "shares_key_with": "NVIDIA NIM Key",
+        },
+        {
+            "name": "nvidia_kimi",
+            "display_name": "NVIDIA NIM (Kimi)",
+            "model_family": "Moonshot Kimi",
+            "model_id": custom_models.get("nvidia_kimi", settings.NVIDIA_KIMI_MODEL_ID or ""),
+            "has_key": bool(settings.NVIDIA_API_KEY),
+            "is_local": False,
+            "daily_quota_limit": 1000,
+            "shares_key_with": "NVIDIA NIM Key",
+        },
+        {
+            "name": "cerebras",
+            "display_name": "Cerebras Llama (Paid/Trial)",
+            "model_family": "Meta Llama Family",
+            "model_id": custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
+            "has_key": bool(settings.CEREBRAS_API_KEY),
+            "is_local": False,
+            "daily_quota_limit": 1000,
+            "shares_key_with": None,
         },
         {
             "name": "ollama",
             "display_name": "Ollama (Local Offline)",
             "model_family": "Self-Hosted Private",
             "model_id": custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
-            "is_configured": not is_hosted,
+            "has_key": True,
             "is_local": True,
-            "daily_request_count": 0,
-            "status": "disabled_in_hosted" if is_hosted else "ready",
+            "daily_quota_limit": None,
+            "shares_key_with": None,
         },
     ]
 
-    return [ProviderStatusItem(**p) for p in providers_info]
+    providers_info = []
+    for d in defs:
+        req_count = quota_map.get(d["name"], 0)
+        has_key = d["has_key"]
+        has_model = bool(d["model_id"] and d["model_id"].strip())
+        is_local = d["is_local"]
+
+        if is_local and is_hosted:
+            status_val = "disabled_in_hosted"
+            is_configured = False
+        elif not has_key:
+            status_val = "missing_key"
+            is_configured = False
+        elif not has_model:
+            status_val = "missing_model_id"
+            is_configured = False
+        else:
+            status_val = "ready"
+            is_configured = True
+
+        limit = d["daily_quota_limit"]
+        is_near_limit = bool(limit and req_count >= (limit * 0.8))
+
+        providers_info.append(
+            ProviderStatusItem(
+                name=d["name"],
+                display_name=d["display_name"],
+                model_family=d["model_family"],
+                model_id=d["model_id"],
+                is_configured=is_configured,
+                is_local=is_local,
+                daily_request_count=req_count,
+                daily_quota_limit=limit,
+                is_near_limit=is_near_limit,
+                shares_key_with=d["shares_key_with"],
+                status=status_val,
+            )
+        )
+
+    return providers_info
+
+
+@router.post("/test-connection", response_model=TestConnectionResponse, dependencies=[Depends(verify_csrf)])
+@limiter.limit("10/minute")
+async def test_council_provider_connection(
+    request: Request,
+    payload: TestConnectionRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Tests a configured AI Council provider connection:
+    - Sends a tiny fixed prompt without financial data
+    - Measures roundtrip latency in ms
+    - Verifies HTTP status and diagnoses errors (invalid key, model not found, rate limited, timeout, bad JSON)
+    - Queries the provider's /models catalog and verifies if model_id is found, offering close matches if not.
+    - Rate limited to 10 tests/minute.
+    - Requires Authentication & CSRF. Never returns or logs API keys.
+    """
+    res = await verify_provider_connectivity(
+        provider_name=payload.provider_name,
+        model_id=payload.model_id,
+        user_settings=current_user.settings or {},
+    )
+    return res
 
 
 @router.post("/preview")
@@ -140,19 +243,35 @@ async def preview_council_prompt(
     }
 
 
-@router.post("/ask", response_model=CouncilDecisionOut, dependencies=[Depends(verify_csrf)])
+@router.post("/ask", response_model=CouncilJobStatus, dependencies=[Depends(verify_csrf)])
 async def ask_council(
     request: AskCouncilRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Submits a financial question for multi-AI Council deliberation.
-    Runs deterministic pre-calculation, server-side PII scrubbing, Round 1 (and optional Round 2 debate),
-    confidence-weighted tallying, and dissent synthesis.
+    Submits a financial question for multi-AI Council deliberation as a background job.
+    Returns immediately with a job ID and initial status for frontend polling and persistence.
     """
-    decision = await execute_council_deliberation(db=db, user=current_user, request=request)
-    return decision
+    job = create_deliberation_job(db=db, user=current_user, request=request, background_tasks=background_tasks)
+    return job
+
+
+@router.get("/jobs/{job_id}", response_model=CouncilJobStatus)
+async def get_council_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieves the real-time progress or completed decision of a Council deliberation job.
+    Supports persistent retrieval if mobile device slept or browser tab was closed.
+    """
+    status_info = get_deliberation_job_status(db=db, user_id=current_user.id, job_id=job_id)
+    if not status_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Council deliberation job not found.")
+    return status_info
 
 
 @router.get("/history", response_model=List[CouncilDecisionOut])

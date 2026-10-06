@@ -7,6 +7,10 @@ import {
   Shield,
   Cpu,
   Check,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Info,
   Globe,
   Download,
   Upload,
@@ -21,6 +25,7 @@ import {
   Lock,
   Unlock,
   KeyRound,
+  Key,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -34,6 +39,9 @@ import {
   ImportCsvResponse,
   RestoreBackupResponse,
 } from "../api/data";
+import { councilApi } from "../api/council";
+import { authApi } from "../api/auth";
+import { TestConnectionResponse } from "../types/council";
 
 export const SettingsPage: React.FC = () => {
   const { user, updateSettings } = useAuth();
@@ -47,6 +55,10 @@ export const SettingsPage: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Council Connection Test State
+  const [testResults, setTestResults] = useState<Record<string, TestConnectionResponse>>({});
+  const [testLoading, setTestLoading] = useState<Record<string, boolean>>({});
+
   // Security / PIN State
   const [pinInput, setPinInput] = useState("");
   const [confirmPinInput, setConfirmPinInput] = useState("");
@@ -56,6 +68,17 @@ export const SettingsPage: React.FC = () => {
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinSuccess, setPinSuccess] = useState<string | null>(null);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
+
+  // Change Password State
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   // CSV Import State
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -173,13 +196,79 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+
+    if (!currentPassword) {
+      setPasswordError("Please enter your current password.");
+      return;
+    }
+
+    if (newPassword.length < 12) {
+      setPasswordError("New password must be at least 12 characters long.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New password and confirmation do not match.");
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      const res = await authApi.changePassword(currentPassword, newPassword);
+      setPasswordSuccess(res.message || "Password changed successfully! Other active sessions were invalidated.");
+      // Clear password fields immediately
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setTimeout(() => setPasswordSuccess(null), 5000);
+    } catch (err: any) {
+      setPasswordError(err.message || "Failed to change password. Please check your current password.");
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleTestConnection = async (providerKey: string, modelId: string) => {
+    setTestLoading((prev) => ({ ...prev, [providerKey]: true }));
+    try {
+      const res = await councilApi.testConnection(providerKey, modelId);
+      setTestResults((prev) => ({ ...prev, [providerKey]: res }));
+    } catch (err: any) {
+      const isRateLimit = err?.status === 429 || (err?.message && err.message.toLowerCase().includes("rate limit"));
+      setTestResults((prev) => ({
+        ...prev,
+        [providerKey]: {
+          provider_name: providerKey,
+          model_id: modelId,
+          http_status: isRateLimit ? 429 : null,
+          latency_ms: 0,
+          status: isRateLimit ? "rate_limited" : "error",
+          diagnosis: isRateLimit
+            ? "Rate limit exceeded (10 tests/min). Please wait a moment before testing again."
+            : err.message || "Failed to execute connection test.",
+          model_found_in_list: null,
+          available_models_count: 0,
+          close_matches: [],
+        },
+      }));
+    } finally {
+      setTestLoading((prev) => ({ ...prev, [providerKey]: false }));
+    }
+  };
+
   const providerFamilies = [
-    { name: "Google Gemini", family: "Google Gemini Family", defaultModel: "gemini-2.5-flash", icon: <Sparkles size={16} />, status: "Active (Free Tier)" },
-    { name: "Groq GPT-OSS", family: "OpenAI / GPT-OSS Family", defaultModel: "openai/gpt-oss-120b", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free Tier)" },
-    { name: "Mistral AI", family: "Mistral Family", defaultModel: "mistral-small-latest", icon: <Shield size={16} />, status: "Active (European Free Tier)" },
-    { name: "OpenRouter Qwen", family: "Qwen Family", defaultModel: "qwen/qwen-2.5-72b-instruct:free", icon: <Globe size={16} />, status: "Active (Free Tier)" },
-    { name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Optional (Paid / Trial Only)" },
-    { name: "Ollama (Local Offline)", family: "Self-Hosted Private", defaultModel: "llama3.2", icon: <Server size={16} />, status: isHosted ? "Disabled in Hosted Mode" : "Local / Offline Only" },
+    { key: "gemini", name: "Google Gemini", family: "Google Gemini Family", defaultModel: "gemini-3.8-flash", icon: <Sparkles size={16} />, status: "Active (Free Tier)" },
+    { key: "groq", name: "Groq GPT-OSS", family: "OpenAI / GPT-OSS Family", defaultModel: "openai/gpt-oss-120b", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free Tier)" },
+    { key: "mistral", name: "Mistral AI", family: "Mistral Family", defaultModel: "mistral-small-latest", icon: <Shield size={16} />, status: "Active (European Free Tier)" },
+    { key: "openrouter", name: "OpenRouter Qwen", family: "Qwen Family", defaultModel: "qwen/qwen3.8-27b:free", icon: <Globe size={16} />, status: "Active (Free Tier)" },
+    { key: "nvidia", name: "NVIDIA NIM GLM", family: "Zhipu GLM", defaultModel: "z-ai/glm-5.3-flash", icon: <Cpu size={16} />, status: "Active (Free Tier - 40 RPM)" },
+    { key: "nvidia_kimi", name: "NVIDIA NIM Kimi", family: "Moonshot Kimi", defaultModel: "moonshotai/kimi-k3", icon: <Cpu size={16} />, status: "Optional (Shared NIM Key)" },
+    { key: "cerebras", name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Optional (Paid / Trial Only)" },
+    { key: "ollama", name: "Ollama (Local Offline)", family: "Self-Hosted Private", defaultModel: "llama3.2", icon: <Server size={16} />, status: isHosted ? "Disabled in Hosted Mode" : "Local / Offline Only" },
   ];
 
   return (
@@ -491,6 +580,176 @@ export const SettingsPage: React.FC = () => {
         )}
       </div>
 
+      {/* 2.6. Account Password Security */}
+      <div className="glass-panel" style={{ padding: "24px" }}>
+        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
+          <Key size={20} style={{ color: "var(--accent-primary)" }} />
+          <h3 style={{ fontSize: "17px" }}>Change Account Password</h3>
+        </div>
+
+        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
+          Update your login password. Changing your password invalidates all other active login sessions for safety.
+        </p>
+
+        {passwordSuccess && (
+          <div
+            className="badge-success flex items-center gap-2"
+            style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}
+          >
+            <CheckCircle2 size={16} className="text-emerald-400" />
+            <span>{passwordSuccess}</span>
+          </div>
+        )}
+
+        {passwordError && (
+          <div
+            className="badge-danger flex items-center gap-2"
+            style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}
+          >
+            <XCircle size={16} className="text-rose-400" />
+            <span>{passwordError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
+          <div className="input-group">
+            <label className="input-label">Current Password</label>
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                type={showCurrentPassword ? "text" : "password"}
+                required
+                className="input-field"
+                style={{ paddingRight: "40px" }}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Enter current password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                style={{
+                  position: "absolute",
+                  right: "12px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--text-muted)",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "4px",
+                }}
+                title={showCurrentPassword ? "Hide password" : "Show password"}
+              >
+                {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="input-group">
+              <label className="input-label">New Password (min 12 chars)</label>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  required
+                  minLength={12}
+                  className="input-field"
+                  style={{ paddingRight: "40px" }}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 12 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  style={{
+                    position: "absolute",
+                    right: "12px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--text-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "4px",
+                  }}
+                  title={showNewPassword ? "Hide password" : "Show password"}
+                >
+                  {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="input-group">
+              <label className="input-label">Confirm New Password</label>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                  minLength={12}
+                  className="input-field"
+                  style={{ paddingRight: "40px" }}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  style={{
+                    position: "absolute",
+                    right: "12px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--text-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "4px",
+                  }}
+                  title={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: "var(--radius-sm)",
+              background: "rgba(99, 102, 241, 0.08)",
+              border: "1px solid rgba(99, 102, 241, 0.2)",
+              fontSize: "12px",
+              color: "var(--text-secondary)",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <Info size={14} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
+            <span>Passwords are hashed with Bcrypt. Passwords must be at least 12 characters and max 72 bytes.</span>
+          </div>
+
+          <button
+            type="submit"
+            disabled={passwordLoading || !isOnline}
+            className="btn btn-primary"
+            style={{ alignSelf: "flex-start", minHeight: "44px" }}
+          >
+            {passwordLoading ? (
+              <span className="flex items-center gap-2">
+                <RefreshCw size={14} className="animate-spin" />
+                <span>Updating Password...</span>
+              </span>
+            ) : (
+              <span>Update Password</span>
+            )}
+          </button>
+        </form>
+      </div>
+
       {/* 3. Data Export & CSV Reports */}
       <div className="glass-panel" style={{ padding: "24px" }}>
         <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
@@ -771,44 +1030,155 @@ export const SettingsPage: React.FC = () => {
         <div className="flex flex-col gap-3">
           {providerFamilies.map((p) => {
             const isLocalDisabled = p.name.includes("Ollama") && isHosted;
+            const isLoading = testLoading[p.key] || false;
+            const res = testResults[p.key];
+
             return (
               <div
-                key={p.name}
-                className="flex items-center justify-between"
+                key={p.key}
                 style={{
-                  padding: "12px 16px",
+                  padding: "14px 16px",
                   borderRadius: "var(--radius-md)",
                   background: "var(--bg-surface-solid)",
                   border: "1px solid var(--border-color)",
                   opacity: isLocalDisabled ? 0.6 : 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
                 }}
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "var(--radius-sm)",
-                      background: "var(--bg-surface-raised)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "var(--accent-primary)",
-                    }}
-                  >
-                    {p.icon}
-                  </div>
-                  <div>
-                    <strong style={{ color: "var(--text-primary)" }}>{p.name}</strong>
-                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                      Family: {p.family} • Default: <code>{p.defaultModel}</code>
+                <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "10px" }}>
+                  <div className="flex items-center gap-3">
+                    <div
+                      style={{
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "var(--radius-sm)",
+                        background: "var(--bg-surface-raised)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--accent-primary)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {p.icon}
                     </div>
+                    <div>
+                      <strong style={{ color: "var(--text-primary)" }}>{p.name}</strong>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+                        Family: {p.family} • Model: <code>{p.defaultModel}</code>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className={`badge ${isLocalDisabled ? "badge-warning" : "badge-secondary"}`} style={{ fontSize: "11px" }}>
+                      {p.status}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={isLocalDisabled || isLoading || !isOnline}
+                      onClick={() => handleTestConnection(p.key, p.defaultModel)}
+                      className="btn btn-secondary btn-sm flex items-center gap-1"
+                      style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
+                      title="Sends a tiny fixed ping with no financial data and tests model catalog"
+                    >
+                      {isLoading ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          <span>Testing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Cpu size={13} />
+                          <span>Test</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
 
-                <span className={`badge ${isLocalDisabled ? "badge-warning" : "badge-success"}`}>
-                  {p.status}
-                </span>
+                {/* Connection Test Result Diagnosis Card */}
+                {res && (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: "var(--radius-sm)",
+                      background:
+                        res.status === "success"
+                          ? "rgba(16, 185, 129, 0.08)"
+                          : res.status === "invalid_key"
+                          ? "rgba(239, 68, 68, 0.08)"
+                          : "rgba(245, 158, 11, 0.08)",
+                      border:
+                        res.status === "success"
+                          ? "1px solid rgba(16, 185, 129, 0.25)"
+                          : res.status === "invalid_key"
+                          ? "1px solid rgba(239, 68, 68, 0.25)"
+                          : "1px solid rgba(245, 158, 11, 0.25)",
+                      fontSize: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "6px" }}>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`badge ${
+                            res.status === "success"
+                              ? "badge-success"
+                              : res.status === "invalid_key"
+                              ? "badge-danger"
+                              : "badge-warning"
+                          }`}
+                          style={{ fontSize: "11px", textTransform: "capitalize" }}
+                        >
+                          {res.status.replace("_", " ")}
+                        </span>
+                        {res.http_status && (
+                          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+                            HTTP {res.http_status}
+                          </span>
+                        )}
+                      </div>
+
+                      {res.latency_ms > 0 && (
+                        <span style={{ color: "var(--text-muted)", fontSize: "11px" }}>
+                          Latency: <strong>{res.latency_ms} ms</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ color: "var(--text-primary)", lineHeight: "1.4" }}>
+                      {res.diagnosis}
+                    </div>
+
+                    {/* Catalog Listing Status */}
+                    {res.model_found_in_list === true && (
+                      <div className="flex items-center gap-1.5" style={{ color: "var(--accent-emerald)", fontSize: "11px" }}>
+                        <CheckCircle2 size={13} className="text-emerald-400" style={{ flexShrink: 0 }} />
+                        <span>Model ID verified in provider's catalog ({res.available_models_count} models available).</span>
+                      </div>
+                    )}
+
+                    {res.model_found_in_list === false && (
+                      <div className="flex items-center gap-1.5" style={{ color: "var(--accent-warning)", fontSize: "11px" }}>
+                        <AlertTriangle size={13} className="text-amber-400" style={{ flexShrink: 0 }} />
+                        <span>
+                          Model ID not found in provider catalog ({res.available_models_count} models).
+                          {res.close_matches.length > 0 && (
+                            <span style={{ marginLeft: "4px" }}>
+                              Did you mean: <strong>{res.close_matches.join(", ")}</strong>?
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

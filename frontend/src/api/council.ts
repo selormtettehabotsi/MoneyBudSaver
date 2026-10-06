@@ -1,8 +1,14 @@
 import { apiClient } from "./client";
-import { CouncilDecision, ProviderStatusItem } from "../types/council";
+import { CouncilDecision, CouncilJobStatus, ProviderStatusItem, TestConnectionResponse } from "../types/council";
 
 export const councilApi = {
   getProviders: () => apiClient<ProviderStatusItem[]>("/api/v1/council/providers"),
+
+  testConnection: (provider_name: string, model_id?: string) =>
+    apiClient<TestConnectionResponse>("/api/v1/council/test-connection", {
+      method: "POST",
+      body: JSON.stringify({ provider_name, model_id }),
+    }),
 
   ask: (data: {
     question: string;
@@ -11,10 +17,13 @@ export const councilApi = {
     enable_debate?: boolean;
     local_only_mode?: boolean;
   }) =>
-    apiClient<CouncilDecision>("/api/v1/council/ask", {
+    apiClient<CouncilJobStatus>("/api/v1/council/ask", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  getJobStatus: (job_id: string) =>
+    apiClient<CouncilJobStatus>(`/api/v1/council/jobs/${job_id}`),
 
   preview: (data: {
     question: string;

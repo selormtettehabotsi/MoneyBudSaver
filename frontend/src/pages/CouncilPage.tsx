@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { councilApi } from "../api/council";
-import { CouncilDecision, ProviderStatusItem } from "../types/council";
+import { CouncilDecision, CouncilJobStatus, ProviderStatusItem } from "../types/council";
 import { useCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/AuthContext";
 import { useSync } from "../context/SyncContext";
@@ -43,6 +43,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
   // Deliberation State
   const [loading, setLoading] = useState(false);
+  const [jobProgress, setJobProgress] = useState<CouncilJobStatus | null>(null);
   const [currentDecision, setCurrentDecision] = useState<CouncilDecision | null>(null);
 
   // Providers Status
@@ -104,9 +105,10 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
     setLoading(true);
     setCurrentDecision(null);
+    setJobProgress(null);
 
     try {
-      const res = await councilApi.ask({
+      const job = await councilApi.ask({
         question: question.trim(),
         decision_type: decisionType,
         candidate_amount: candidateAmount ? candidateAmount : null,
@@ -114,11 +116,41 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
         local_only_mode: localOnlyMode,
       });
 
-      setCurrentDecision(res);
-      loadProvidersAndHistory();
+      setJobProgress(job);
+
+      if (job.status === "completed" && job.decision) {
+        setCurrentDecision(job.decision);
+        setLoading(false);
+        loadProvidersAndHistory();
+        return;
+      }
+
+      // Poll background status every 1.5s
+      const intervalId = setInterval(async () => {
+        try {
+          const currentJob = await councilApi.getJobStatus(job.job_id);
+          setJobProgress(currentJob);
+
+          if (currentJob.status === "completed") {
+            clearInterval(intervalId);
+            if (currentJob.decision) {
+              setCurrentDecision(currentJob.decision);
+            }
+            setLoading(false);
+            loadProvidersAndHistory();
+          } else if (currentJob.status === "failed") {
+            clearInterval(intervalId);
+            setLoading(false);
+            alert(currentJob.error || "Council deliberation failed.");
+            loadProvidersAndHistory();
+          }
+        } catch (pollErr: any) {
+          console.error("Deliberation polling error:", pollErr);
+        }
+      }, 1500);
+
     } catch (err: any) {
-      alert(err.message || "Council deliberation failed.");
-    } finally {
+      alert(err.message || "Council deliberation failed to start.");
       setLoading(false);
     }
   };
@@ -156,7 +188,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
   // Calculate active distinct model families for diversity check
   const readyProviders = providers.filter((p) => p.status === "ready" && p.is_configured);
   const distinctFamilies = Array.from(new Set(readyProviders.map((p) => p.model_family)));
-  const fewerThanFourFamilies = distinctFamilies.length < 4;
+  const fewerThanFiveFamilies = distinctFamilies.length < 5;
 
   return (
     <div className="flex flex-col gap-6" style={{ width: "100%", maxWidth: "100%" }}>
@@ -175,22 +207,48 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
             const isReady = p.status === "ready";
             const statusLabel = isReady
               ? "Ready"
+              : p.status === "missing_model_id"
+              ? "Set Model ID"
               : p.status === "disabled_in_hosted"
               ? "Local Only"
+              : p.status === "rate_limited"
+              ? "Rate Limited"
               : "Not Configured";
+
+            const badgeClass = isReady
+              ? p.is_near_limit
+                ? "badge-warning"
+                : "badge-success"
+              : "badge-secondary";
+
             return (
               <span
                 key={p.name}
-                className={`badge ${isReady ? "badge-success" : "badge-secondary"}`}
+                className={`badge ${badgeClass}`}
                 style={{
                   fontSize: "11px",
                   padding: "4px 8px",
                   opacity: isReady ? 1 : 0.75,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
                 }}
-                title={`${p.display_name} • ${p.model_family} (${p.model_id}) - ${statusLabel}`}
+                title={`${p.display_name} • ${p.model_family} (${p.model_id || "no model"}) - ${statusLabel}${
+                  p.shares_key_with ? " • Shares rate limit with " + p.shares_key_with : ""
+                }${p.daily_quota_limit ? ` • Today: ${p.daily_request_count}/${p.daily_quota_limit}` : ""}`}
               >
                 <Cpu size={12} />
-                <span>{p.display_name.split(" ")[0]}: {statusLabel}</span>
+                <span>
+                  {p.display_name.replace("NVIDIA NIM", "NVIDIA").split(" ")[0]}: {statusLabel}
+                </span>
+                {p.shares_key_with && isReady && (
+                  <span style={{ fontSize: "9px", opacity: 0.8, fontStyle: "italic" }}>(shared limit)</span>
+                )}
+                {isReady && p.daily_quota_limit && (
+                  <span style={{ fontSize: "10px", opacity: 0.85, marginLeft: "2px" }}>
+                    [{p.daily_request_count}/{p.daily_quota_limit}]
+                  </span>
+                )}
               </span>
             );
           })}
@@ -200,7 +258,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       <DisclaimerBanner />
 
       {/* Model Family Diversity Warning Banner */}
-      {fewerThanFourFamilies && (
+      {fewerThanFiveFamilies && (
         <div
           className="glass-panel flex items-start gap-3"
           style={{
@@ -213,16 +271,16 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
           <AlertTriangle size={20} style={{ color: "var(--accent-warning)", flexShrink: 0, marginTop: "2px" }} />
           <div style={{ fontSize: "13px", lineHeight: "1.5" }}>
             <strong style={{ color: "var(--text-primary)" }}>
-              Model Family Diversity Warning ({distinctFamilies.length}/4 Families Active)
+              Model Family Diversity Warning ({distinctFamilies.length}/5 Families Active)
             </strong>
             <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)" }}>
-              Fewer than 4 distinct AI model families are active (currently active:{" "}
+              Fewer than 5 distinct AI model families are active (currently active:{" "}
               {distinctFamilies.length > 0 ? (
                 <strong>{distinctFamilies.join(", ")}</strong>
               ) : (
                 <em>None configured yet</em>
               )}
-              ). To ensure robust, unbiased council deliberation, configure keys for <strong>Gemini</strong>, <strong>Groq (gpt-oss)</strong>, <strong>Mistral</strong>, and <strong>OpenRouter (Qwen)</strong> in your environment or Settings.
+              ). For maximally balanced and robust deliberation, configure keys for <strong>Google (Gemini)</strong>, <strong>OpenAI open model (Groq)</strong>, <strong>Mistral</strong>, <strong>Qwen (OpenRouter)</strong>, and <strong>Zhipu GLM (NVIDIA NIM)</strong>.
             </p>
           </div>
         </div>
@@ -380,18 +438,66 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
             </form>
           </div>
 
-          {/* Loading Animation Placeholder */}
+          {/* Loading Animation and Real-Time Deliberation Progress */}
           {loading && (
             <div
               className="glass-panel flex flex-col items-center justify-center"
-              style={{ padding: "40px 20px", gap: "14px" }}
+              style={{ padding: "36px 20px", gap: "16px" }}
             >
               <Scale size={36} className="text-indigo-400" style={{ animation: "pulseGlow 1.5s ease-in-out infinite" }} />
-              <div style={{ textAlign: "center" }}>
-                <h3 style={{ fontSize: "17px" }}>Council Members are Voting & Debating...</h3>
+              <div style={{ textAlign: "center", width: "100%", maxWidth: "560px" }}>
+                <div className="flex items-center justify-center gap-2" style={{ marginBottom: "6px" }}>
+                  <h3 style={{ fontSize: "17px" }}>Council Members are Voting & Debating...</h3>
+                  {jobProgress && (
+                    <span className="badge badge-info" style={{ fontSize: "11px" }}>
+                      Round {jobProgress.current_round} of {jobProgress.total_rounds}
+                    </span>
+                  )}
+                </div>
                 <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "4px" }}>
                   Feeding pre-computed financial ratios to models, evaluating risks, and debating consensus.
                 </p>
+
+                {/* Per-Provider Live Progress Chips */}
+                {jobProgress && jobProgress.providers_progress && Object.keys(jobProgress.providers_progress).length > 0 && (
+                  <div
+                    className="flex items-center justify-center gap-2"
+                    style={{ flexWrap: "wrap", marginTop: "14px" }}
+                  >
+                    {Object.entries(jobProgress.providers_progress).map(([pName, pStatus]) => {
+                      const isDone = pStatus.includes("voted") || pStatus.includes("finished");
+                      const isFailed = pStatus.includes("failed");
+                      const isSkipped = pStatus.includes("Skipped");
+
+                      const badgeClass = isDone
+                        ? "badge-success"
+                        : isFailed
+                        ? "badge-danger"
+                        : isSkipped
+                        ? "badge-secondary"
+                        : "badge-warning";
+
+                      return (
+                        <span
+                          key={pName}
+                          className={`badge ${badgeClass}`}
+                          style={{
+                            fontSize: "12px",
+                            padding: "5px 10px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <Cpu size={12} />
+                          <span style={{ textTransform: "capitalize" }}>
+                            {pName.replace("_", " ")}: {pStatus}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

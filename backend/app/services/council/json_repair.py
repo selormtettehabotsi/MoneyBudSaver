@@ -23,27 +23,38 @@ You MUST respond with a SINGLE RAW JSON OBJECT matching this EXACT schema (no ma
 
 def extract_and_repair_json(raw_text: str) -> Optional[Dict[str, Any]]:
     """
-    Extracts, cleans, and repairs JSON objects from LLM text responses.
+    Extracts, cleans, and repairs JSON objects from LLM text responses,
+    including reasoning models (e.g., GLM, DeepSeek, Kimi) that output <think>...</think> blocks.
     """
     if not raw_text:
         return None
 
     cleaned = raw_text.strip()
 
-    # 1. Strip markdown code fences if present
+    # 1. Strip reasoning blocks: <think>...</think> or <thought>...</thought>
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<thought>[\s\S]*?</thought>", "", cleaned, flags=re.IGNORECASE)
+    # If unclosed <think> tag remains before the JSON
+    if "<think>" in cleaned.lower() and "{" in cleaned:
+        first_brace = cleaned.find("{")
+        cleaned = cleaned[first_brace:]
+    
+    cleaned = cleaned.strip()
+
+    # 2. Strip markdown code fences if present
     if "```" in cleaned:
         # Match ```json ... ``` or ``` ... ```
         match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
         if match:
             cleaned = match.group(1).strip()
 
-    # 2. If text contains surrounding content, locate first '{' and last '}'
+    # 3. If text contains surrounding content, locate first '{' and last '}'
     start_idx = cleaned.find("{")
     end_idx = cleaned.rfind("}")
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
         cleaned = cleaned[start_idx : end_idx + 1]
 
-    # 3. Direct parse attempt
+    # 4. Direct parse attempt
     try:
         data = json.loads(cleaned)
         if isinstance(data, dict):

@@ -18,6 +18,9 @@ def get_configured_providers(
     """
     custom_models = (user_settings or {}).get("custom_model_ids", {})
     providers_enabled = (user_settings or {}).get("providers_enabled", {})
+    custom_tokens = (user_settings or {}).get("custom_max_tokens", {})
+    custom_reasoning = (user_settings or {}).get("custom_reasoning_efforts", {})
+    custom_thinking = (user_settings or {}).get("custom_thinking_levels", {})
 
     # In local-only mode, use exclusively Ollama
     if local_only_mode:
@@ -31,6 +34,7 @@ def get_configured_providers(
                 model_id=custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
                 base_url=f"{settings.OLLAMA_BASE_URL}/v1",
                 is_local=True,
+                max_tokens=custom_tokens.get("ollama", 4096),
             )
         ]
 
@@ -45,6 +49,8 @@ def get_configured_providers(
                 model_family="Google Gemini Family",
                 model_id=custom_models.get("gemini", settings.GEMINI_MODEL_ID),
                 api_key=settings.GEMINI_API_KEY,
+                thinking_level=custom_thinking.get("gemini", "low"),
+                max_output_tokens=custom_tokens.get("gemini", 4096),
             )
         )
 
@@ -58,6 +64,8 @@ def get_configured_providers(
                 model_id=custom_models.get("groq", settings.GROQ_MODEL_ID),
                 base_url="https://api.groq.com/openai/v1",
                 api_key=settings.GROQ_API_KEY,
+                max_tokens=custom_tokens.get("groq", 4096),
+                reasoning_effort=custom_reasoning.get("groq", "low"),
             )
         )
 
@@ -71,6 +79,7 @@ def get_configured_providers(
                 model_id=custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
                 base_url="https://api.cerebras.ai/v1",
                 api_key=settings.CEREBRAS_API_KEY,
+                max_tokens=custom_tokens.get("cerebras", 4096),
             )
         )
 
@@ -84,6 +93,7 @@ def get_configured_providers(
                 model_id=custom_models.get("mistral", settings.MISTRAL_MODEL_ID),
                 base_url="https://api.mistral.ai/v1",
                 api_key=settings.MISTRAL_API_KEY,
+                max_tokens=custom_tokens.get("mistral", 4096),
             )
         )
 
@@ -97,6 +107,8 @@ def get_configured_providers(
                 model_id=custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID),
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.OPENROUTER_API_KEY,
+                max_tokens=custom_tokens.get("openrouter", 4096),
+                reasoning_effort=custom_reasoning.get("openrouter", "low"),
                 extra_headers={
                     "HTTP-Referer": "https://github.com/selormtettehabotsi/MoneyBudSaver",
                     "X-Title": "MoneyCouncil",
@@ -104,7 +116,41 @@ def get_configured_providers(
             )
         )
 
-    # 6. Optional Local Ollama (only if local deployment)
+    # 6. Zhipu GLM Family via NVIDIA NIM
+    if providers_enabled.get("nvidia", True) and settings.NVIDIA_API_KEY:
+        adapters.append(
+            OpenAICompatibleAdapter(
+                name="nvidia",
+                display_name="NVIDIA NIM (GLM)",
+                model_family="Zhipu GLM",
+                model_id=custom_models.get("nvidia", settings.NVIDIA_MODEL_ID),
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=settings.NVIDIA_API_KEY,
+                max_tokens=custom_tokens.get("nvidia", 4096),
+                shared_rate_limit_key="nvidia",
+            )
+        )
+
+    # 7. Optional Moonshot Kimi Family via NVIDIA NIM (shares NVIDIA_API_KEY)
+    if (
+        providers_enabled.get("nvidia_kimi", True)
+        and settings.NVIDIA_API_KEY
+        and settings.NVIDIA_KIMI_MODEL_ID
+    ):
+        adapters.append(
+            OpenAICompatibleAdapter(
+                name="nvidia_kimi",
+                display_name="NVIDIA NIM (Kimi)",
+                model_family="Moonshot Kimi",
+                model_id=custom_models.get("nvidia_kimi", settings.NVIDIA_KIMI_MODEL_ID),
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=settings.NVIDIA_API_KEY,
+                max_tokens=custom_tokens.get("nvidia_kimi", 4096),
+                shared_rate_limit_key="nvidia",
+            )
+        )
+
+    # 8. Optional Local Ollama (only if local deployment)
     if not settings.is_hosted and providers_enabled.get("ollama", False):
         adapters.append(
             OpenAICompatibleAdapter(
@@ -114,6 +160,7 @@ def get_configured_providers(
                 model_id=custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
                 base_url=f"{settings.OLLAMA_BASE_URL}/v1",
                 is_local=True,
+                max_tokens=custom_tokens.get("ollama", 4096),
             )
         )
 

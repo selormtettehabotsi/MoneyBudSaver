@@ -1,11 +1,13 @@
 """
 Database initialization and default seeding helpers.
 """
+from datetime import datetime, timezone
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from app.db.session import engine, Base
 from app.db.base import *  # ensure all models are registered
 from app.models.category import Category
+from app.models.council import CouncilJob
 from app.constants import DEFAULT_CATEGORIES
 
 
@@ -33,12 +35,54 @@ def run_schema_migrations(target_engine=None):
                 except Exception:
                     pass
 
+    if "council_decisions" in table_names:
+        cols = [c["name"] for c in inspector.get_columns("council_decisions")]
+        if "status" not in cols:
+            with db_engine.begin() as conn:
+                if db_engine.dialect.name == "sqlite":
+                    conn.execute(text("ALTER TABLE council_decisions ADD COLUMN status VARCHAR(20) DEFAULT 'completed'"))
+                else:
+                    conn.execute(text("ALTER TABLE council_decisions ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'completed'"))
+
+    if "users" in table_names:
+        user_cols = [c["name"] for c in inspector.get_columns("users")]
+        if "token_version" not in user_cols:
+            with db_engine.begin() as conn:
+                if db_engine.dialect.name == "sqlite":
+                    conn.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 1"))
+
+    # Ensure all tables (including council_jobs) exist
+    Base.metadata.create_all(bind=db_engine)
+
+
+def recover_stale_council_jobs(target_engine=None):
+    """
+    On server startup, marks any Council jobs left in 'running' or 'pending' state
+    as failed so users do not get stuck on dead in-flight tasks after a restart.
+    """
+    db_engine = target_engine or engine
+    try:
+        with Session(db_engine) as session:
+            stale_jobs = session.query(CouncilJob).filter(
+                CouncilJob.status.in_(["pending", "running"])
+            ).all()
+            for job in stale_jobs:
+                job.status = "failed"
+                job.error = "Server restarted during deliberation. Please submit your inquiry again."
+                job.updated_at = datetime.now(timezone.utc)
+            session.commit()
+    except Exception:
+        pass
+
 
 def init_db(target_engine=None):
-    """Create all database tables and apply pending schema migrations."""
+    """Create all database tables, apply pending schema migrations, and recover stale jobs."""
     db_engine = target_engine or engine
     Base.metadata.create_all(bind=db_engine)
     run_schema_migrations(db_engine)
+    recover_stale_council_jobs(db_engine)
 
 
 def seed_default_categories(db: Session, user_id: str):

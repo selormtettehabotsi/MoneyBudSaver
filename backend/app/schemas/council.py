@@ -60,6 +60,7 @@ class CouncilDecisionOut(BaseModel):
     candidate_amount: Optional[Decimal]
     enable_debate: bool
     local_only_mode: bool
+    status: str = "completed"
     financial_snapshot: Dict[str, Any]
     round1_votes: Dict[str, Any]
     round2_votes: Optional[Dict[str, Any]]
@@ -71,6 +72,35 @@ class CouncilDecisionOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CouncilJobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    current_round: int
+    total_rounds: int
+    providers_progress: Dict[str, str] = Field(default_factory=dict)
+    decision: Optional[CouncilDecisionOut] = None
+    error: Optional[str] = None
+
+
+class TestConnectionRequest(BaseModel):
+    __test__ = False
+    provider_name: str
+    model_id: Optional[str] = None
+
+
+class TestConnectionResponse(BaseModel):
+    __test__ = False
+    provider_name: str
+    model_id: str
+    http_status: Optional[int] = None
+    latency_ms: int
+    status: Literal["success", "invalid_key", "model_not_found", "rate_limited", "timeout", "bad_json", "error", "skipped"]
+    diagnosis: str
+    model_found_in_list: Optional[bool] = None
+    available_models_count: int = 0
+    close_matches: List[str] = Field(default_factory=list)
 
 
 class UserDecisionSubmit(BaseModel):
@@ -85,5 +115,8 @@ class ProviderStatusItem(BaseModel):
     model_id: str
     is_configured: bool
     is_local: bool
-    daily_request_count: int
-    status: Literal["ready", "missing_key", "disabled_in_hosted", "rate_limited"]
+    daily_request_count: int = 0
+    daily_quota_limit: Optional[int] = None
+    is_near_limit: bool = False
+    shares_key_with: Optional[str] = None
+    status: Literal["ready", "missing_key", "missing_model_id", "disabled_in_hosted", "rate_limited"]

@@ -59,6 +59,15 @@ async def get_current_user(
             detail="User account not found.",
         )
 
+    token_version = payload.get("v")
+    if token_version is not None and getattr(user, "token_version", None) is not None:
+        if token_version != user.token_version:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session invalidated due to password change. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -8,12 +8,34 @@ import time
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import re
 import bcrypt
 from jose import jwt, JWTError
 
 from app.config import settings
 
 MAX_PASSWORD_BYTES = 72
+
+
+def redact_sensitive_info(text: Optional[str]) -> str:
+    """
+    Redacts API keys, Authorization headers, and key query parameters
+    from error strings, exception text, and logs.
+    """
+    if not text:
+        return ""
+    # Redact Bearer tokens
+    s = re.sub(r'(?i)bearer\s+[a-zA-Z0-9_\-\.]{8,}', 'Bearer [REDACTED]', text)
+    # Redact key= or api_key= in URLs or logs
+    s = re.sub(r'(?i)([?&](?:api[-_]?)?key=)[^&\s"\']+', r'\1[REDACTED]', s)
+    # Redact header key-values
+    s = re.sub(r'(?i)(x-goog-api-key|authorization|api[-_]?key)[:=]\s*["\']?[a-zA-Z0-9_\-\.]{8,}["\']?', r'\1: [REDACTED]', s)
+    # Redact well-known vendor key patterns
+    s = re.sub(r'gsk_[a-zA-Z0-9]{20,}', 'gsk_[REDACTED]', s)
+    s = re.sub(r'sk-[a-zA-Z0-9]{20,}', 'sk-[REDACTED]', s)
+    s = re.sub(r'AIzaSy[a-zA-Z0-9_\-]{25,}', 'AIzaSy[REDACTED]', s)
+    s = re.sub(r'nvapi-[a-zA-Z0-9_\-]{20,}', 'nvapi-[REDACTED]', s)
+    return s
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

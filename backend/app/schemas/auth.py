@@ -33,6 +33,18 @@ class UserLogin(BaseModel):
         return v
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=12, description="New password must be at least 12 characters")
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password_byte_length(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 bytes.")
+        return v
+
+
 class UserSettingsUpdate(BaseModel):
     currency: Optional[str] = Field(None, max_length=10)
     settings: Optional[Dict[str, Any]] = None

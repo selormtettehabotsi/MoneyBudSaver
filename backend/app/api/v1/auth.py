@@ -18,6 +18,7 @@ from app.models.user import User
 from app.schemas.auth import (
     UserRegister,
     UserLogin,
+    ChangePasswordRequest,
     UserOut,
     UserSettingsUpdate,
     CSRFTokenOut,
@@ -27,9 +28,9 @@ from app.schemas.auth import (
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-def _set_auth_cookies(response: Response, user_id: str) -> str:
+def _set_auth_cookies(response: Response, user_id: str, token_version: int = 1) -> str:
     """Helper to generate and attach session JWT and CSRF cookies."""
-    token = create_access_token(data={"sub": user_id})
+    token = create_access_token(data={"sub": user_id, "v": token_version})
     csrf_token = generate_csrf_token(user_id)
 
     # HttpOnly session cookie
@@ -118,7 +119,7 @@ async def register(payload: UserRegister, response: Response, db: Session = Depe
     seed_default_categories(db, user.id)
 
     # Attach cookies
-    _set_auth_cookies(response, user.id)
+    _set_auth_cookies(response, user.id, token_version=user.token_version or 1)
 
     user_out = UserOut.model_validate(user)
     user_out.is_hosted = settings.is_hosted
@@ -147,11 +148,49 @@ async def login(
             detail="User account is inactive.",
         )
 
-    _set_auth_cookies(response, user.id)
+    _set_auth_cookies(response, user.id, token_version=user.token_version or 1)
 
     user_out = UserOut.model_validate(user)
     user_out.is_hosted = settings.is_hosted
     return user_out
+
+
+@router.post("/change-password", response_model=MessageResponse, dependencies=[Depends(verify_csrf)])
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    payload: ChangePasswordRequest,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Securely change user password.
+    - Requires active session & valid CSRF token.
+    - Rate limited to 5 requests per minute.
+    - Verifies current password.
+    - Enforces min 12 chars and max 72 bytes.
+    - Increments token_version to invalidate other active sessions.
+    - Re-issues session cookies for the current client.
+    - Never logs passwords.
+    """
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password.",
+        )
+
+    # Hash new password
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    # Increment token_version to invalidate all other active tokens
+    current_user.token_version = (current_user.token_version or 1) + 1
+    db.commit()
+    db.refresh(current_user)
+
+    # Refresh session cookies for the current caller so they stay authenticated
+    _set_auth_cookies(response, current_user.id, token_version=current_user.token_version)
+
+    return MessageResponse(message="Password changed successfully.")
 
 
 @router.post("/logout", response_model=MessageResponse)

@@ -3,6 +3,7 @@ MoneyCouncil FastAPI Main Application Entry Point.
 Serves both REST API and single-origin React PWA frontend.
 """
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,9 +17,12 @@ from app.core.csp import SecurityHeadersMiddleware
 from app.core.limiter import limiter
 from app.db.init_db import init_db
 from app.api.api_router import api_v1_router
-from app.api.api_router import api_v1_router
 from app.api.v1.health import router as health_router
 from app.api.v1.cron import router as cron_router
+
+# Set log levels for external HTTP libraries to prevent logging sensitive URLs / query parameters
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager

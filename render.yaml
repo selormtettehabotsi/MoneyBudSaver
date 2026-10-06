@@ -25,3 +25,9 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: NVIDIA_API_KEY
+        sync: false # Requires phone verification on build.nvidia.com
+      - key: NVIDIA_MODEL_ID
+        value: z-ai/glm-5.3-flash
+      - key: NVIDIA_KIMI_MODEL_ID
+        value: moonshotai/kimi-k3

@@ -9,7 +9,7 @@ Built with **FastAPI**, **SQLAlchemy**, and **React 18 + TypeScript + Vite**, Mo
 ## ✨ Key Features
 
 - **🏛️ Multi-AI Council Deliberation Engine**:
-  - Deliberates across 4 distinct free model families: Google Gemini, Groq (OpenAI / GPT-OSS), Mistral AI, and OpenRouter (Qwen Family), plus optional paid/trial Cerebras and local Ollama.
+  - Deliberates across 5 distinct free model families: Google Gemini (`gemini-3.8-flash`), Groq (`openai/gpt-oss-120b`), Mistral AI (`mistral-small-latest`), OpenRouter (`qwen/qwen3.8-27b:free`), and NVIDIA NIM (`z-ai/glm-5.3-flash`, plus optional `moonshotai/kimi-k3`), alongside optional paid/trial Cerebras and local Ollama.
   - 2-Round deliberation protocol: Round 1 blind vote $\to$ Round 2 peer debate & revoting $\to$ Confidence-weighted tally ($[-1.0, +1.0]$).
   - Hard mathematical guardrail overrides for excessive Debt-to-Income (DTI) and emergency runway depletion.
 - **📊 Financial Health Score & Automated Review**:

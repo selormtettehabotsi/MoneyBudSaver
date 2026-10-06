@@ -15,6 +15,7 @@ class CouncilDecision(Base):
     candidate_amount = Column(Numeric(14, 2), nullable=True)
     enable_debate = Column(Boolean, default=False, nullable=False)
     local_only_mode = Column(Boolean, default=False, nullable=False)
+    status = Column(String(20), default="completed", nullable=False)  # 'pending', 'running', 'completed', 'failed'
 
     # Anonymized Facts computed by deterministic engine
     financial_snapshot = Column(JSON, default=dict, nullable=False)
@@ -50,6 +51,24 @@ class ProviderQuota(Base):
     __table_args__ = (
         UniqueConstraint("provider_name", "date", name="uq_provider_date"),
     )
+
+
+class CouncilJob(Base):
+    __tablename__ = "council_jobs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), default="pending", nullable=False)  # 'pending', 'running', 'completed', 'failed'
+    current_round = Column(Integer, default=1, nullable=False)
+    total_rounds = Column(Integer, default=1, nullable=False)
+    providers_progress = Column(JSON, default=dict, nullable=False)
+    error = Column(Text, nullable=True)
+    decision_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="council_jobs")
 
 
 class CouncilCache(Base):

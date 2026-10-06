@@ -32,18 +32,19 @@ Follow these steps to deploy a live web app accessible from your phone, tablet, 
 ---
 
 ### Step 2: Obtain Free Multi-AI Provider API Keys
-MoneyCouncil uses 4 distinct free-tier AI providers to ensure unbiased multi-model council consensus:
+MoneyCouncil integrates 5 distinct free-tier AI model families to ensure unbiased multi-model council consensus. *Note: Free tiers and model availability change over time—use the console links below to manage your keys.*
 
-| Provider | Free Tier Link | Model Family | Default Recommended Model |
-| :--- | :--- | :--- | :--- |
-| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | Google Gemini | `gemini-2.5-flash` |
-| **Groq** | [console.groq.com](https://console.groq.com/) | OpenAI / GPT-OSS | `openai/gpt-oss-120b` |
-| **Mistral AI** | [console.mistral.ai](https://console.mistral.ai/) | Mistral | `mistral-small-latest` |
-| **OpenRouter** | [openrouter.ai](https://openrouter.ai/) | Qwen | `qwen/qwen-2.5-72b-instruct:free` |
+| Provider | Free Tier Console Link | Model Family | Default Verified Model ID | Rate Limit / Quota |
+| :--- | :--- | :--- | :--- | :--- |
+| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | Google | `gemini-3.8-flash` | Free tier (~15 RPM, 1500 RPD) |
+| **Groq** | [console.groq.com](https://console.groq.com/) | OpenAI open model | `openai/gpt-oss-120b` | Free tier (~30 RPM, 14.4k RPD) |
+| **Mistral AI** | [console.mistral.ai](https://console.mistral.ai/) | Mistral | `mistral-small-latest` | Free tier (~1 req/s, 1000 RPD) |
+| **OpenRouter** | [openrouter.ai](https://openrouter.ai/models) | Qwen | `qwen/qwen3.8-27b:free` *(Fallback: `inclusionai/ling-3.1-flash`)* | Free tier (~200 RPD on free models) |
+| **NVIDIA NIM** | [build.nvidia.com](https://build.nvidia.com/) | Zhipu GLM & Moonshot Kimi | `z-ai/glm-5.3-flash` *(2nd: `moonshotai/kimi-k3`)* | Free tier (~40 RPM shared limit, requires SMS verification) |
 
 *(Optional: Cerebras is also supported as an optional paid/trial provider `llama3.3-70b` at [cloud.cerebras.ai](https://cloud.cerebras.ai/)).*
 
-*(You can configure any subset of keys — 1, 2, 3, or all 4. The Council runs normally with any subset of keys, showing unconfigured members as "not configured" rather than throwing an error!)*
+*(You can configure any subset of keys — 1, 2, 3, or all 5. The Council runs normally with any subset of keys, showing unconfigured members as "not configured" rather than throwing an error!)*
 
 ---
 
@@ -71,7 +72,8 @@ MoneyCouncil uses 4 distinct free-tier AI providers to ensure unbiased multi-mod
    GROQ_API_KEY=your_groq_api_key_here
    MISTRAL_API_KEY=your_mistral_api_key_here
    OPENROUTER_API_KEY=your_openrouter_api_key_here
-   # Optional Paid / Trial: CEREBRAS_API_KEY=your_cerebras_key
+   NVIDIA_API_KEY=your_nvidia_api_key_here
+   # Optional 2nd NIM model / Paid: CEREBRAS_API_KEY=your_cerebras_key
    ```
 7. Click **Create Web Service**. Render will build the React PWA and deploy the FastAPI container.
 
@@ -158,9 +160,22 @@ The app launches full-screen with native 100dvh safe-area support, touch gesture
 
 ---
 
+## 🛡️ Pre-Deployment & Schema Migration Safety
+
+Before deploying code updates, re-deploying containers, or applying database schema changes:
+1. **Download a Full JSON Backup**: Go to **Settings** → **Full Database Backup & Disaster Recovery (JSON)** → Click **Export Full Snapshot**.
+2. Store the downloaded `.json` snapshot safely on your device or cloud drive.
+3. If anything goes wrong or if rolling back to a previous container version, you can restore all categories, transactions, budgets, savings goals, debts, and deliberations in 1 click using **Restore Snapshot**.
+
+> [!IMPORTANT]
+> Schema migrations are automatically executed on startup via `init_db()`. Migrations are idempotent and non-destructive (e.g., adding `client_id`, `token_version`, and creating `council_jobs` without modifying existing rows). Downloading a backup prior to major upgrades is an industry-standard best practice.
+
+---
+
 ## 🔒 Security Best Practices Checklist
 
 - [x] **Change Production Secrets**: Never deploy with the default `SECRET_KEY` or `CRON_SECRET`.
+- [x] **Pre-Deploy Backups**: Always download a JSON backup from **Settings** before deploying container updates.
 - [x] **Secure Cookies**: Automatically enforced on HTTPS domains and `DEPLOYMENT_MODE=hosted`.
 - [x] **CSRF Protection**: All mutation endpoints (`POST`, `PUT`, `DELETE`) require the `X-CSRF-Token` header.
 - [x] **Server-Side PII Scrubbing**: All transaction descriptions and sensitive merchant details are anonymized on the server immediately before outbound provider dispatch.
