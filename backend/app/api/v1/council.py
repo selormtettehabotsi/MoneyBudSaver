@@ -45,13 +45,18 @@ async def list_council_providers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Returns the configuration status and model family details for all AI Council providers."""
+    """Returns the configuration status, median TTFT, fallback model, and model family details for all AI Council providers."""
     from datetime import date
     from app.models.council import ProviderQuota
-    
+    from app.services.council.adapters_factory import derive_model_family
+    from app.services.council.health_manager import get_provider_median_ttft
+
     is_hosted = settings.is_hosted
     user_settings = current_user.settings or {}
     custom_models = user_settings.get("custom_model_ids", {})
+    custom_fallbacks = user_settings.get("custom_fallback_models", {})
+    custom_families = user_settings.get("custom_model_families", {})
+    providers_enabled = user_settings.get("providers_enabled", {})
 
     # Fetch today's quotas from DB
     today = date.today()
@@ -63,82 +68,98 @@ async def list_council_providers(
         {
             "name": "gemini",
             "display_name": "Google Gemini",
-            "model_family": "Google Gemini Family",
             "model_id": custom_models.get("gemini", settings.GEMINI_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("gemini", settings.GEMINI_FALLBACK_MODEL_ID),
+            "env_family": settings.GEMINI_MODEL_FAMILY,
             "has_key": bool(settings.GEMINI_API_KEY),
             "is_local": False,
             "daily_quota_limit": 1500,
             "shares_key_with": None,
+            "default_enabled": True,
         },
         {
             "name": "groq",
             "display_name": "Groq GPT-OSS",
-            "model_family": "OpenAI / GPT-OSS Family",
             "model_id": custom_models.get("groq", settings.GROQ_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("groq", settings.GROQ_FALLBACK_MODEL_ID),
+            "env_family": settings.GROQ_MODEL_FAMILY,
             "has_key": bool(settings.GROQ_API_KEY),
             "is_local": False,
             "daily_quota_limit": 14400,
             "shares_key_with": None,
+            "default_enabled": True,
         },
         {
             "name": "mistral",
             "display_name": "Mistral AI",
-            "model_family": "Mistral Family",
             "model_id": custom_models.get("mistral", settings.MISTRAL_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("mistral", settings.MISTRAL_FALLBACK_MODEL_ID),
+            "env_family": settings.MISTRAL_MODEL_FAMILY,
             "has_key": bool(settings.MISTRAL_API_KEY),
             "is_local": False,
             "daily_quota_limit": 1000,
             "shares_key_with": None,
+            "default_enabled": True,
         },
         {
             "name": "openrouter",
             "display_name": "OpenRouter Qwen",
-            "model_family": "Qwen Family",
             "model_id": custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("openrouter", settings.OPENROUTER_FALLBACK_MODEL_ID),
+            "env_family": settings.OPENROUTER_MODEL_FAMILY,
             "has_key": bool(settings.OPENROUTER_API_KEY),
             "is_local": False,
             "daily_quota_limit": 200,
             "shares_key_with": None,
+            "default_enabled": True,
         },
         {
             "name": "nvidia",
             "display_name": "NVIDIA NIM (GLM)",
-            "model_family": "Zhipu GLM",
             "model_id": custom_models.get("nvidia", settings.NVIDIA_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("nvidia", settings.NVIDIA_FALLBACK_MODEL_ID),
+            "env_family": settings.NVIDIA_MODEL_FAMILY,
             "has_key": bool(settings.NVIDIA_API_KEY),
             "is_local": False,
             "daily_quota_limit": 1000,
             "shares_key_with": "NVIDIA NIM Key",
+            "default_enabled": True,
         },
         {
             "name": "nvidia_kimi",
             "display_name": "NVIDIA NIM (Kimi)",
-            "model_family": "Moonshot Kimi",
             "model_id": custom_models.get("nvidia_kimi", settings.NVIDIA_KIMI_MODEL_ID or ""),
+            "fallback_model_id": custom_fallbacks.get("nvidia_kimi", settings.NVIDIA_KIMI_FALLBACK_MODEL_ID),
+            "env_family": settings.NVIDIA_KIMI_MODEL_FAMILY,
             "has_key": bool(settings.NVIDIA_API_KEY),
             "is_local": False,
             "daily_quota_limit": 1000,
             "shares_key_with": "NVIDIA NIM Key",
+            "default_enabled": True,
         },
         {
             "name": "cerebras",
             "display_name": "Cerebras Llama (Paid/Trial)",
-            "model_family": "Meta Llama Family",
             "model_id": custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("cerebras", settings.CEREBRAS_FALLBACK_MODEL_ID),
+            "env_family": settings.CEREBRAS_MODEL_FAMILY,
             "has_key": bool(settings.CEREBRAS_API_KEY),
             "is_local": False,
             "daily_quota_limit": 1000,
             "shares_key_with": None,
+            "default_enabled": False,
         },
         {
             "name": "ollama",
             "display_name": "Ollama (Local Offline)",
-            "model_family": "Self-Hosted Private",
             "model_id": custom_models.get("ollama", settings.OLLAMA_MODEL_ID),
+            "fallback_model_id": custom_fallbacks.get("ollama", settings.OLLAMA_FALLBACK_MODEL_ID),
+            "env_family": settings.OLLAMA_MODEL_FAMILY,
             "has_key": True,
             "is_local": True,
             "daily_quota_limit": None,
             "shares_key_with": None,
+            "default_enabled": False,
         },
     ]
 
@@ -169,12 +190,24 @@ async def list_council_providers(
         if cb_tripped:
             status_val = "circuit_breaker_tripped"
 
+        # Dynamically derive model family
+        derived_family = custom_families.get(d["name"]) or derive_model_family(
+            d["model_id"], d["name"], d["env_family"]
+        )
+
+        # Retrieve rolling median TTFT
+        median_ttft = get_provider_median_ttft(db, d["name"])
+
+        # Council toggle status
+        enabled_in_council = providers_enabled.get(d["name"], d["default_enabled"])
+
         providers_info.append(
             ProviderStatusItem(
                 name=d["name"],
                 display_name=d["display_name"],
-                model_family=d["model_family"],
+                model_family=derived_family,
                 model_id=d["model_id"],
+                fallback_model_id=d["fallback_model_id"],
                 is_configured=is_configured,
                 is_local=is_local,
                 daily_request_count=req_count,
@@ -185,10 +218,13 @@ async def list_council_providers(
                 circuit_breaker_tripped=cb_tripped,
                 circuit_breaker_reason=cb_reason,
                 circuit_breaker_resets_in_seconds=cb_secs,
+                median_ttft_ms=median_ttft,
+                enabled_in_council=enabled_in_council,
             )
         )
 
     return providers_info
+
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse, dependencies=[Depends(verify_csrf)])

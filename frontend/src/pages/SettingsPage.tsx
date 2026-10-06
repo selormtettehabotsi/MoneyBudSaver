@@ -58,9 +58,18 @@ export const SettingsPage: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Council Connection Test State
+  // Council Connection Test & Provider Status State
   const [testResults, setTestResults] = useState<Record<string, TestConnectionResponse>>({});
   const [testLoading, setTestLoading] = useState<Record<string, boolean>>({});
+  const [backendProviders, setBackendProviders] = useState<Record<string, any>>({});
+
+  React.useEffect(() => {
+    councilApi.getProviders().then((list) => {
+      const map: Record<string, any> = {};
+      list.forEach((p) => { map[p.name] = p; });
+      setBackendProviders(map);
+    }).catch(() => {});
+  }, []);
 
   // Security / PIN State
   const [pinInput, setPinInput] = useState("");
@@ -1035,6 +1044,31 @@ export const SettingsPage: React.FC = () => {
             const isLocalDisabled = p.name.includes("Ollama") && isHosted;
             const isLoading = testLoading[p.key] || false;
             const res = testResults[p.key];
+            const bp = backendProviders[p.key];
+
+            const currentFamily = bp?.model_family || p.family;
+            const fallbackModel = bp?.fallback_model_id;
+            const medianTtft = bp?.median_ttft_ms ?? res?.median_ttft_ms;
+            const isEnabledInCouncil = bp?.enabled_in_council !== undefined
+              ? bp.enabled_in_council
+              : (user?.settings?.providers_enabled?.[p.key] ?? (p.key !== "cerebras" && p.key !== "ollama"));
+
+            const handleToggleCouncil = async (newVal: boolean) => {
+              const currentEnabled = { ...(user?.settings?.providers_enabled || {}) };
+              currentEnabled[p.key] = newVal;
+              try {
+                await updateSettings(selectedCurrency, {
+                  ...(user?.settings || {}),
+                  providers_enabled: currentEnabled,
+                });
+                setBackendProviders((prev) => ({
+                  ...prev,
+                  [p.key]: { ...prev[p.key], enabled_in_council: newVal },
+                }));
+              } catch (err: any) {
+                alert(err.message || "Failed to update provider status.");
+              }
+            };
 
             return (
               <div
@@ -1068,14 +1102,43 @@ export const SettingsPage: React.FC = () => {
                       {p.icon}
                     </div>
                     <div>
-                      <strong style={{ color: "var(--text-primary)" }}>{p.name}</strong>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong style={{ color: "var(--text-primary)" }}>{p.name}</strong>
+                        {medianTtft !== null && medianTtft !== undefined && medianTtft > 0 && (
+                          <span
+                            className="badge badge-secondary flex items-center gap-1"
+                            style={{ fontSize: "10px", padding: "1px 6px" }}
+                            title="Rolling median Time to First Token"
+                          >
+                            <Timer size={10} />
+                            <span>Median TTFT: <strong>{medianTtft}ms</strong></span>
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                        Family: {p.family} • Model: <code>{p.defaultModel}</code>
+                        Family: <strong>{currentFamily}</strong> • Model: <code>{p.defaultModel}</code>
+                        {fallbackModel && (
+                          <span> • Fallback: <code>{fallbackModel}</code></span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    {/* Use in Council Toggle */}
+                    {!isLocalDisabled && (
+                      <label className="flex items-center gap-1.5" style={{ fontSize: "12px", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={isEnabledInCouncil}
+                          onChange={(e) => handleToggleCouncil(e.target.checked)}
+                        />
+                        <span style={{ color: isEnabledInCouncil ? "var(--text-primary)" : "var(--text-muted)", fontWeight: 500 }}>
+                          Use in Council
+                        </span>
+                      </label>
+                    )}
+
                     <span className={`badge ${isLocalDisabled ? "badge-warning" : "badge-secondary"}`} style={{ fontSize: "11px" }}>
                       {p.status}
                     </span>
@@ -1086,7 +1149,7 @@ export const SettingsPage: React.FC = () => {
                       onClick={() => handleTestConnection(p.key, p.defaultModel)}
                       className="btn btn-secondary btn-sm flex items-center gap-1"
                       style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
-                      title="Sends a tiny fixed ping with no financial data and tests model catalog"
+                      title="Sends a fixed ping without financial data and tests chat-capable catalog"
                     >
                       {isLoading ? (
                         <>
@@ -1152,7 +1215,7 @@ export const SettingsPage: React.FC = () => {
                           </span>
                         )}
                         {res.chat_status && (
-                          <span className={`badge ${res.chat_status === "success" ? "badge-success" : "badge-warning"}`} style={{ fontSize: "10px" }}>
+                          <span className={`badge ${res.chat_status === "ok" || res.chat_status === "success" ? "badge-success" : "badge-warning"}`} style={{ fontSize: "10px" }}>
                             Chat: {res.chat_status}
                           </span>
                         )}
@@ -1163,6 +1226,11 @@ export const SettingsPage: React.FC = () => {
                           <span className="flex items-center gap-1" title="Time to first token">
                             <Timer size={11} />
                             <span>TTFT: <strong>{res.ttft_ms}ms</strong></span>
+                          </span>
+                        )}
+                        {res.median_ttft_ms !== null && res.median_ttft_ms !== undefined && (
+                          <span className="flex items-center gap-1" title="Rolling median TTFT">
+                            <span>(Median: <strong>{res.median_ttft_ms}ms</strong>)</span>
                           </span>
                         )}
                         {res.latency_ms > 0 && (
@@ -1206,7 +1274,7 @@ export const SettingsPage: React.FC = () => {
                     {res.model_found_in_list === true && (
                       <div className="flex items-center gap-1.5" style={{ color: "var(--accent-emerald)", fontSize: "11px" }}>
                         <CheckCircle2 size={13} className="text-emerald-400" style={{ flexShrink: 0 }} />
-                        <span>Model ID verified in provider's catalog ({res.available_models_count} models available).</span>
+                        <span>Model ID verified in chat catalog ({res.available_models_count} chat models available).</span>
                       </div>
                     )}
 
@@ -1214,7 +1282,7 @@ export const SettingsPage: React.FC = () => {
                       <div className="flex items-center gap-1.5" style={{ color: "var(--accent-warning)", fontSize: "11px" }}>
                         <AlertTriangle size={13} className="text-amber-400" style={{ flexShrink: 0 }} />
                         <span>
-                          Model ID not found in provider catalog ({res.available_models_count} models).
+                          Model ID not found in chat catalog ({res.available_models_count} chat models).
                           {res.close_matches.length > 0 && (
                             <span style={{ marginLeft: "4px" }}>
                               Did you mean: <strong>{res.close_matches.join(", ")}</strong>?
@@ -1224,11 +1292,37 @@ export const SettingsPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* OpenRouter Free Models List with One-Click Copy */}
+                    {/* Alternative Model Suggestions on Capacity Issue / Probe Hang */}
+                    {res.alternative_models && res.alternative_models.length > 0 && (
+                      <div style={{ marginTop: "4px", padding: "6px 10px", borderRadius: "var(--radius-xs)", background: "rgba(99, 102, 241, 0.1)", border: "1px solid rgba(99, 102, 241, 0.25)" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "4px" }}>
+                          Suggested Alternative Models from Catalog:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {res.alternative_models.map((alt) => (
+                            <button
+                              key={alt}
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(alt);
+                                alert(`Copied alternative Model ID to clipboard:\n${alt}`);
+                              }}
+                              className="btn btn-secondary btn-sm flex items-center gap-1"
+                              style={{ padding: "3px 7px", fontSize: "10px", minHeight: "24px" }}
+                            >
+                              <Copy size={10} />
+                              <code>{alt}</code>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Catalog Models List with One-Click Copy */}
                     {res.free_models && res.free_models.length > 0 && (
                       <div style={{ marginTop: "4px", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
                         <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "6px" }}>
-                          Available Free Models ({res.free_models.length} with zero prompt/completion price):
+                          {res.available_models_label || "Available Free Models"}:
                         </div>
                         <div className="flex flex-wrap gap-1.5" style={{ maxHeight: "140px", overflowY: "auto" }}>
                           {res.free_models.map((mId) => (
@@ -1245,7 +1339,9 @@ export const SettingsPage: React.FC = () => {
                             >
                               <Copy size={10} />
                               <code>{mId}</code>
-                              <span className="badge badge-success" style={{ fontSize: "8px", padding: "1px 3px" }}>Free</span>
+                              {p.key === "openrouter" && (
+                                <span className="badge badge-success" style={{ fontSize: "8px", padding: "1px 3px" }}>Free</span>
+                              )}
                             </button>
                           ))}
                         </div>

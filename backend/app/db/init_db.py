@@ -53,6 +53,20 @@ def run_schema_migrations(target_engine=None):
                 else:
                     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 1"))
 
+    if "provider_circuit_breakers" in table_names:
+        cb_cols = [c["name"] for c in inspector.get_columns("provider_circuit_breakers")]
+        with db_engine.begin() as conn:
+            if "ttft_samples" not in cb_cols:
+                if db_engine.dialect.name == "sqlite":
+                    conn.execute(text("ALTER TABLE provider_circuit_breakers ADD COLUMN ttft_samples JSON DEFAULT '[]'"))
+                else:
+                    conn.execute(text("ALTER TABLE provider_circuit_breakers ADD COLUMN IF NOT EXISTS ttft_samples JSON DEFAULT '[]'"))
+            if "median_ttft_ms" not in cb_cols:
+                if db_engine.dialect.name == "sqlite":
+                    conn.execute(text("ALTER TABLE provider_circuit_breakers ADD COLUMN median_ttft_ms INTEGER"))
+                else:
+                    conn.execute(text("ALTER TABLE provider_circuit_breakers ADD COLUMN IF NOT EXISTS median_ttft_ms INTEGER"))
+
     # Ensure all tables (including council_jobs) exist
     Base.metadata.create_all(bind=db_engine)
 

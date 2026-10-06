@@ -705,10 +705,10 @@ def test_model_family_diversity():
 
         assert len(adapters) == 5
         assert len(families) == 5
-        assert "Google Gemini Family" in families
-        assert "OpenAI / GPT-OSS Family" in families
-        assert "Mistral Family" in families
-        assert "Qwen Family" in families
+        assert "Google Gemini" in families
+        assert "OpenAI" in families
+        assert "Mistral AI" in families
+        assert "Qwen" in families
         assert "Zhipu GLM" in families
         assert not any(a.name == "cerebras" for a in adapters)
 
@@ -2082,6 +2082,11 @@ def test_test_connection_rate_limit_20_per_minute(make_auth_client, monkeypatch)
     except Exception:
         pass
 
+    async def mock_noop_pacing(provider, interval=None):
+        pass
+
+    monkeypatch.setattr("app.services.council.connection_tester.wait_for_provider_pacing", mock_noop_pacing)
+
     # First 20 requests succeed
     for i in range(20):
         res = client.post(
@@ -2096,6 +2101,303 @@ def test_test_connection_rate_limit_20_per_minute(make_auth_client, monkeypatch)
         json={"provider_name": "mistral", "model_id": "mistral-small-latest"},
     )
     assert res21.status_code == 429
+
+
+def test_catalog_filtering_chat_models():
+    """
+    CATALOG FILTERING:
+    - Exclude embeddings, audio/speech (whisper, tts), image generation, moderation/guard, and rerank models.
+    - Uses provider metadata where it exists (Gemini supportedGenerationMethods, OpenRouter output modalities)
+      and name-based rules as fallback.
+    """
+    from app.services.council.connection_tester import is_chat_capable_model
+
+    # 1. Non-chat model names should be excluded
+    assert is_chat_capable_model("text-embedding-3-small") is False
+    assert is_chat_capable_model("bge-large-en-v1.5") is False
+    assert is_chat_capable_model("whisper-large-v3") is False
+    assert is_chat_capable_model("tts-1-hd") is False
+    assert is_chat_capable_model("dall-e-3") is False
+    assert is_chat_capable_model("black-forest-labs/flux-1-schnell") is False
+    assert is_chat_capable_model("meta-llama/llama-guard-3-8b") is False
+    assert is_chat_capable_model("google/shieldgemma-9b") is False
+    assert is_chat_capable_model("bge-reranker-large") is False
+
+    # 2. Chat models should pass
+    assert is_chat_capable_model("gemini-2.5-flash") is True
+    assert is_chat_capable_model("openai/gpt-oss-120b") is True
+    assert is_chat_capable_model("mistral-small-latest") is True
+    assert is_chat_capable_model("deepseek/deepseek-chat") is True
+    assert is_chat_capable_model("qwen/qwen-2.5-72b-instruct") is True
+
+    # 3. Gemini metadata checks
+    assert is_chat_capable_model("models/embedding-001", metadata={"supportedGenerationMethods": ["embedContent"]}) is False
+    assert is_chat_capable_model("models/gemini-pro", metadata={"supportedGenerationMethods": ["generateContent", "countTokens"]}) is True
+
+    # 4. OpenRouter metadata checks
+    assert is_chat_capable_model("audio-model", metadata={"architecture": {"output_modalities": ["audio"]}}) is False
+    assert is_chat_capable_model("chat-model", metadata={"architecture": {"output_modalities": ["text"]}}) is True
+
+
+@pytest.mark.asyncio
+async def test_free_label_rule_only_openrouter(monkeypatch):
+    """
+    FREE-LABEL ACCURACY:
+    - Show a 'Free' badge only where the provider publishes prices (OpenRouter).
+    - For other providers (Gemini, Groq, NVIDIA, Mistral), label the list:
+      'Models available to your key (free-tier eligibility not published by this provider)'.
+    - Do not treat missing price data as free anywhere.
+    """
+    import httpx
+    from app.services.council.connection_tester import _fetch_models_openai_compatible, verify_provider_connectivity
+
+    async def mock_noop_pacing(provider, interval=None):
+        pass
+
+    monkeypatch.setattr("app.services.council.connection_tester.wait_for_provider_pacing", mock_noop_pacing)
+
+    # 1. OpenRouter catalog with pricing
+    async def mock_openrouter_get(client_obj, url, *args, **kwargs):
+        data = {
+            "data": [
+                {"id": "meta-llama/llama-3.3-70b-instruct:free", "pricing": {"prompt": "0", "completion": "0"}, "architecture": {"output_modalities": ["text"]}},
+                {"id": "anthropic/claude-3.5-sonnet", "pricing": {"prompt": "0.000003", "completion": "0.000015"}, "architecture": {"output_modalities": ["text"]}},
+                {"id": "some-unknown/model", "pricing": {}, "architecture": {"output_modalities": ["text"]}}
+            ]
+        }
+        return httpx.Response(200, json=data, request=httpx.Request("GET", str(url)))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_openrouter_get)
+    models, free_list, is_free_map = await _fetch_models_openai_compatible("https://openrouter.ai/api/v1", api_key="test-key", is_openrouter=True)
+    assert is_free_map["meta-llama/llama-3.3-70b-instruct:free"] is True
+    assert is_free_map["anthropic/claude-3.5-sonnet"] is False
+    assert is_free_map["some-unknown/model"] is False  # Missing price data is NOT treated as free
+
+    # 2. Non-OpenRouter catalog (Groq)
+    async def mock_groq_get(client_obj, url, *args, **kwargs):
+        data = {"data": [{"id": "openai/gpt-oss-120b"}, {"id": "llama-3.3-70b-versatile"}]}
+        return httpx.Response(200, json=data, request=httpx.Request("GET", str(url)))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_groq_get)
+    g_models, g_free_list, g_is_free_map = await _fetch_models_openai_compatible("https://api.groq.com/openai/v1", api_key="test-key", is_openrouter=False)
+    for m in g_models:
+        assert g_is_free_map[m] is False
+    assert len(g_free_list) == 0
+
+    # 3. verify_provider_connectivity label check
+    async def mock_groq_post(client_obj, url, *args, **kwargs):
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"status": "ok"}'}}]}, request=httpx.Request("POST", str(url)))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_groq_post)
+    conn_res = await verify_provider_connectivity("groq", "openai/gpt-oss-120b", {"groq_api_key": "gsk_test"})
+    assert conn_res.available_models_label == "Models available to your key (free-tier eligibility not published by this provider)"
+    assert conn_res.is_free is False
+
+
+@pytest.mark.asyncio
+async def test_transient_error_retries_and_fallback_model(monkeypatch):
+    """
+    TRANSIENT ERRORS AND FALLBACK MODELS:
+    - On 503, 502, 529 or 'overloaded' responses and on 429, retry up to 2 times
+      with exponential backoff and jitter.
+    - If retries fail, query the fallback model and record model_used and is_fallback.
+    """
+    import httpx
+    import json
+    from app.services.council.base_adapter import OpenAICompatibleAdapter
+
+    call_count = 0
+
+    async def mock_post(client_obj, url, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        body = kwargs.get("json") or json.loads(kwargs.get("content") or "{}")
+        model_req = body.get("model")
+        
+        # Primary model fails with 503 overloaded
+        if model_req == "primary-model-id":
+            return httpx.Response(503, text="Service Overloaded", request=httpx.Request("POST", str(url)))
+        
+        # Fallback model succeeds
+        if model_req == "fallback-model-id":
+            resp_content = json.dumps({
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "verdict": "approve",
+                            "confidence": 85,
+                            "reasoning": "Fallback model evaluated successfully."
+                        })
+                    }
+                }]
+            })
+            return httpx.Response(200, text=resp_content, request=httpx.Request("POST", str(url)))
+
+        return httpx.Response(400, text="Bad Request", request=httpx.Request("POST", str(url)))
+
+    async def mock_fast_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr("asyncio.sleep", mock_fast_sleep)
+
+    adapter = OpenAICompatibleAdapter(
+        name="groq",
+        display_name="Groq",
+        base_url="https://api.groq.com/openai/v1",
+        api_key="gsk_test",
+        model_id="primary-model-id",
+        model_family="Meta Llama",
+        fallback_model_id="fallback-model-id",
+        min_request_interval_seconds=0.0,
+    )
+
+    vote = await adapter.query(prompt="Prompt", system_instruction="Instruction", timeout_seconds=10.0)
+    assert vote.status == "success"
+    assert vote.verdict == "approve"
+    assert vote.model_used == "fallback-model-id"
+    assert vote.is_fallback is True
+    # 1 initial try + 2 retries on primary = 3 calls, then 1 call on fallback = 4 total calls
+    assert call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_rate_pacing_across_call_types():
+    """
+    RATE PACING:
+    - Enforces a minimum interval between ALL requests to the same provider
+      (catalog, test, and chat calls). Default 1.5s for mistral.
+    """
+    import time
+    from app.services.council.base_adapter import wait_for_provider_pacing, _PROVIDER_LAST_CALLED
+
+    provider = "mistral_test_pacing"
+    # Set last called to now
+    _PROVIDER_LAST_CALLED[provider] = time.monotonic()
+
+    t0 = time.monotonic()
+    # Pacing with 0.1s minimum interval for test speed
+    await wait_for_provider_pacing(provider, min_interval_seconds=0.1)
+    elapsed = time.monotonic() - t0
+    assert elapsed >= 0.08, f"Expected pacing delay >= 0.08s, got {elapsed:.4f}s"
+
+
+def test_dynamic_family_counting_and_diversity_warning():
+    """
+    FAMILY LABELS AND DIVERSITY:
+    - Derive family labels dynamically from model ID.
+    - Diversity warning must count distinct families among providers that are enabled AND healthy.
+    - Warn when fewer than 4 work.
+    """
+    from app.services.council.adapters_factory import derive_model_family
+    from app.services.council.engine import _calculate_tally
+    from app.schemas.council import IndividualVote
+
+    # 1. Test derivation rules
+    assert derive_model_family("qwen/qwen-2.5-72b-instruct", "openrouter") == "Qwen"
+    assert derive_model_family("nvidia/nemotron-4-340b", "nvidia") == "NVIDIA Nemotron"
+    assert derive_model_family("deepseek-ai/deepseek-r1", "groq") == "DeepSeek"
+    assert derive_model_family("z-ai/glm-4", "openrouter") == "Zhipu GLM"
+    assert derive_model_family("moonshotai/kimi-k1.5", "nvidia_kimi") == "Moonshot Kimi"
+    assert derive_model_family("google/gemma-2-27b", "groq") == "Google Gemma"
+    assert derive_model_family("gemini-2.5-flash", "gemini") == "Google Gemini"
+    assert derive_model_family("mistral-small-latest", "mistral") == "Mistral AI"
+    assert derive_model_family("custom-model", "custom", env_override="Custom Family") == "Custom Family"
+
+    # 2. Test diversity warning with fewer than 4 distinct working families
+    votes = [
+        IndividualVote(
+            provider_name="Groq",
+            display_name="Groq",
+            model_id="qwen/qwen-2.5-72b",
+            model_family="Qwen",
+            status="success",
+            verdict="approve",
+            confidence=80,
+            reasoning="OK",
+        ),
+        IndividualVote(
+            provider_name="OpenRouter",
+            display_name="OpenRouter",
+            model_id="qwen/qwen-2.5-32b",
+            model_family="Qwen",  # Same family!
+            status="success",
+            verdict="approve",
+            confidence=85,
+            reasoning="OK",
+        ),
+        IndividualVote(
+            provider_name="Mistral",
+            display_name="Mistral",
+            model_id="mistral-small-latest",
+            model_family="Mistral AI",
+            status="success",
+            verdict="approve",
+            confidence=90,
+            reasoning="OK",
+        ),
+        IndividualVote(
+            provider_name="Gemini",
+            display_name="Gemini",
+            model_id="gemini-2.5-flash",
+            model_family="Google Gemini",
+            status="failed",  # Failed!
+            error_message="Timeout",
+        ),
+    ]
+
+    tally = _calculate_tally(votes, min_quorum=3)
+    # Distinct working families: Qwen, Mistral AI = 2 (< 4)
+    assert tally.active_families_count == 2
+    assert tally.diversity_warning is not None
+    assert "Low council diversity" in tally.diversity_warning
+    assert "2 distinct model families" in tally.diversity_warning
+
+
+@pytest.mark.asyncio
+async def test_concurrent_nvidia_probes_and_capacity_diagnosis(monkeypatch):
+    """
+    SLOW PROVIDERS AND PROBES:
+    - Cap each NVIDIA diagnostic probe at 45s and run the two probes concurrently.
+    - If both fail/timeout, report 'provider-side capacity issue' and suggest alternative chat models.
+    """
+    import httpx
+    from app.services.council.connection_tester import verify_provider_connectivity
+
+    async def mock_noop_pacing(provider, interval=None):
+        pass
+
+    monkeypatch.setattr("app.services.council.connection_tester.wait_for_provider_pacing", mock_noop_pacing)
+
+    # Mock catalog call returning alternative models
+    async def mock_get(client_obj, url, *args, **kwargs):
+        data = {
+            "data": [
+                {"id": "meta/llama-3.3-70b-instruct"},
+                {"id": "mistralai/mixtral-8x22b-instruct-v0.1"},
+                {"id": "deepseek-ai/deepseek-r1"},
+            ]
+        }
+        return httpx.Response(200, json=data, request=httpx.Request("GET", str(url)))
+
+    # Mock chat probes timing out / failing with 504
+    async def mock_post(client_obj, url, *args, **kwargs):
+        return httpx.Response(504, text="Gateway Timeout", request=httpx.Request("POST", str(url)))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    res = await verify_provider_connectivity(
+        provider_name="nvidia",
+        model_id="deepseek-ai/deepseek-r1",
+        user_settings={},
+    )
+
+    assert res.status == "timeout"
+    assert "provider-side capacity issue" in res.diagnosis.lower()
+    assert len(res.alternative_models) > 0
+    assert "meta/llama-3.3-70b-instruct" in res.alternative_models
+
 
 
 

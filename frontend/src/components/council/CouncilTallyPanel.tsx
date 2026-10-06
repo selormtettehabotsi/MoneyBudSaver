@@ -182,6 +182,28 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
         </div>
       )}
 
+      {/* Model Family Diversity Warning Banner */}
+      {tally.diversity_warning && (
+        <div
+          className="badge-warning flex items-start gap-3"
+          style={{
+            padding: "12px 16px",
+            borderRadius: "var(--radius-md)",
+            marginBottom: "16px",
+            border: "1px solid rgba(234, 179, 8, 0.3)",
+            background: "rgba(234, 179, 8, 0.08)",
+          }}
+        >
+          <AlertTriangle size={18} style={{ color: "var(--warning)", flexShrink: 0, marginTop: "2px" }} />
+          <div style={{ fontSize: "13px", lineHeight: "1.4" }}>
+            <strong style={{ color: "var(--text-primary)" }}>Model Family Diversity Notice:</strong>
+            <p style={{ margin: "3px 0 0 0", color: "var(--text-secondary)" }}>
+              {tally.diversity_warning}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* No Quorum Action Banner */}
       {isNoQuorum && (
         <div

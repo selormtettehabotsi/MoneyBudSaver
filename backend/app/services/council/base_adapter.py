@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
@@ -42,6 +43,31 @@ def parse_retry_after(header_value: Optional[str]) -> int:
     return 1
 
 
+async def wait_for_provider_pacing(provider_name: str, min_interval_seconds: float = 0.0) -> None:
+    """
+    Enforces a minimum interval between ALL requests to the same provider
+    (including catalog, test and chat calls).
+    """
+    norm_name = provider_name.lower().strip()
+    eff_interval = min_interval_seconds
+    if eff_interval <= 0.0 and norm_name == "mistral":
+        eff_interval = getattr(settings, "MISTRAL_MIN_REQUEST_INTERVAL_SECONDS", 1.5)
+    if eff_interval <= 0.0:
+        return
+
+    if norm_name not in _PROVIDER_SERIAL_LOCKS:
+        _PROVIDER_SERIAL_LOCKS[norm_name] = asyncio.Lock()
+
+    async with _PROVIDER_SERIAL_LOCKS[norm_name]:
+        loop = asyncio.get_running_loop()
+        last_call = _PROVIDER_LAST_CALLED.get(norm_name, 0.0)
+        now = loop.time()
+        elapsed = now - last_call
+        if elapsed < eff_interval:
+            await asyncio.sleep(eff_interval - elapsed)
+        _PROVIDER_LAST_CALLED[norm_name] = asyncio.get_running_loop().time()
+
+
 async def _wait_for_shared_key_start(key_id: str, min_interval_seconds: float = 1.5) -> None:
     """
     Spaces out request STARTS for providers sharing an API key/rate limit.
@@ -69,6 +95,7 @@ class BaseProviderAdapter(ABC):
         display_name: str,
         model_family: str,
         model_id: str,
+        fallback_model_id: Optional[str] = None,
         timeout_seconds: int = 25,
         shared_rate_limit_key: Optional[str] = None,
         stagger_interval_seconds: float = 1.5,
@@ -78,6 +105,7 @@ class BaseProviderAdapter(ABC):
         self.display_name = display_name
         self.model_family = model_family
         self.model_id = model_id
+        self.fallback_model_id = fallback_model_id
         self.timeout_seconds = timeout_seconds
         self.shared_rate_limit_key = shared_rate_limit_key
         self.stagger_interval_seconds = stagger_interval_seconds
@@ -112,6 +140,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         model_family: str,
         model_id: str,
         base_url: str,
+        fallback_model_id: Optional[str] = None,
         api_key: Optional[str] = None,
         is_local: bool = False,
         extra_headers: Optional[Dict[str, str]] = None,
@@ -128,6 +157,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             display_name=display_name,
             model_family=model_family,
             model_id=model_id,
+            fallback_model_id=fallback_model_id,
             timeout_seconds=timeout_seconds,
             shared_rate_limit_key=shared_rate_limit_key,
             stagger_interval_seconds=stagger_interval_seconds,
@@ -216,7 +246,6 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             pass
 
         # Provider-specific reasoning / thinking parameter configuration (treated as optional extras)
-        # 1. OpenRouter reasoning parameters: https://openrouter.ai/docs/parameters#reasoning
         if self.name not in _UNSUPPORTED_THINKING_PROVIDERS:
             if "openrouter" in self.name or "openrouter.ai" in self.base_url:
                 if self.reasoning_effort:
@@ -224,39 +253,207 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                     if self.reasoning_max_tokens is not None:
                         payload["reasoning"]["max_tokens"] = self.reasoning_max_tokens
 
-            # 2. NVIDIA NIM OpenAI-compatible parameters:
-            # https://docs.api.nvidia.com/nim/reference/openai-compatible-chat-completions
-            # https://build.nvidia.com/
             if "nvidia" in self.name or "integrate.api.nvidia.com" in self.base_url:
                 payload["chat_template_kwargs"] = {"clear_thinking": True, "enable_thinking": False}
                 if self.reasoning_effort:
                     payload["reasoning_effort"] = self.reasoning_effort
 
-        # Serialise calls to the same provider and enforce minimum request interval
-        if self.name not in _PROVIDER_SERIAL_LOCKS:
-            _PROVIDER_SERIAL_LOCKS[self.name] = asyncio.Lock()
+        # Enforce minimum interval between all requests to this provider
+        await wait_for_provider_pacing(self.name, self.min_request_interval_seconds)
 
-        async with _PROVIDER_SERIAL_LOCKS[self.name]:
-            if self.min_request_interval_seconds > 0:
-                loop = asyncio.get_running_loop()
-                last_call = _PROVIDER_LAST_CALLED.get(self.name, 0.0)
-                elapsed = loop.time() - last_call
-                if elapsed < self.min_request_interval_seconds:
-                    await asyncio.sleep(self.min_request_interval_seconds - elapsed)
-                _PROVIDER_LAST_CALLED[self.name] = asyncio.get_running_loop().time()
+        # If this provider shares an API key and rate limit, space out request START times
+        if self.shared_rate_limit_key:
+            await _wait_for_shared_key_start(
+                self.shared_rate_limit_key,
+                min_interval_seconds=self.stagger_interval_seconds,
+            )
 
-            # If this provider shares an API key and rate limit, space out request START times
-            if self.shared_rate_limit_key:
-                await _wait_for_shared_key_start(
-                    self.shared_rate_limit_key,
-                    min_interval_seconds=self.stagger_interval_seconds,
-                )
+        # Run HTTP query with retry and fallback model support
+        vote = await self._execute_query(endpoint, payload, headers, eff_timeout, round_number)
+        vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
+        vote.display_name = self.display_name
+        return vote
 
-            # Run HTTP query concurrently
-            vote = await self._execute_query(endpoint, payload, headers, eff_timeout, round_number)
-            vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
-            vote.display_name = self.display_name
-            return vote
+    async def _execute_single_attempt(
+        self,
+        client: httpx.AsyncClient,
+        endpoint: str,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+        model_name_used: str,
+        is_fallback_model: bool,
+        round_number: int,
+    ) -> IndividualVote:
+        res = await client.post(endpoint, json=payload, headers=headers)
+
+        # Auto-retry without thinking/reasoning parameters if rejected with 400 or 422
+        if res.status_code in (400, 422) and any(k in payload for k in ("chat_template_kwargs", "reasoning", "reasoning_effort")):
+            is_unsupported = False
+            try:
+                err_data = res.json()
+                err_obj = err_data.get("error", {}) if isinstance(err_data, dict) else {}
+                code = str(err_obj.get("code", "")).lower()
+                param = str(err_obj.get("param", "")).lower()
+                err_msg = str(err_obj.get("message", "")).lower()
+            except Exception:
+                code, param, err_msg = "", "", res.text.lower()
+
+            if param in ("chat_template_kwargs", "reasoning_effort", "reasoning", "enable_thinking", "clear_thinking", "thinkingconfig", "thinkingbudget", "thinkinglevel"):
+                is_unsupported = True
+            elif code in ("unrecognized_parameter", "unsupported_parameter", "invalid_parameter", "unknown_parameter"):
+                is_unsupported = True
+            elif any(t in err_msg for t in ("chat_template_kwargs", "enable_thinking", "clear_thinking", "reasoning_effort", "reasoning", "thinking", "unknown parameter", "unrecognized", "extra fields not permitted", "unexpected field", "invalid argument", "not supported")):
+                is_unsupported = True
+
+            if is_unsupported:
+                _UNSUPPORTED_THINKING_PROVIDERS.add(self.name)
+                try:
+                    from app.db.session import SessionLocal
+                    from app.services.council.health_manager import record_thinking_support_db
+                    with SessionLocal() as db_sess:
+                        record_thinking_support_db(db_sess, self.name, model_name_used, supported=False)
+                except Exception:
+                    pass
+
+                retry_payload = {
+                    k: v for k, v in payload.items()
+                    if k not in ("chat_template_kwargs", "reasoning", "reasoning_effort")
+                }
+                res = await client.post(endpoint, json=retry_payload, headers=headers)
+
+        # Check transient errors and return vote
+        if res.status_code == 429:
+            retry_after_str = res.headers.get("Retry-After")
+            retry_secs = parse_retry_after(retry_after_str)
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="rate_limited",
+                round_number=round_number,
+                error_message=f"Provider rate limit reached (HTTP 429). Retry in {retry_secs} seconds.",
+            )
+
+        if res.status_code in (502, 503, 529) or (res.status_code >= 500 and "overloaded" in res.text.lower()):
+            clean_err = redact_sensitive_info(res.text[:200])
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="unavailable",
+                round_number=round_number,
+                error_message=f"Provider transiently unavailable (HTTP {res.status_code}): {clean_err}",
+            )
+
+        if res.status_code in (401, 403):
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="failed",
+                round_number=round_number,
+                error_message=f"Invalid API Key: Provider rejected authentication (HTTP {res.status_code}).",
+            )
+
+        if res.status_code == 402:
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="unavailable",
+                round_number=round_number,
+                error_message="Provider credits exhausted / payment required (HTTP 402). Model unavailable.",
+            )
+
+        if res.status_code == 404:
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="unavailable",
+                round_number=round_number,
+                error_message=f"Model ID '{model_name_used}' not found or deprecated by provider (HTTP 404). Model unavailable.",
+            )
+
+        if res.status_code != 200:
+            clean_err = redact_sensitive_info(res.text[:200])
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="failed",
+                round_number=round_number,
+                error_message=f"HTTP {res.status_code}: {clean_err}",
+            )
+
+        data = res.json()
+        choice = data.get("choices", [{}])[0]
+        finish_reason = choice.get("finish_reason")
+
+        if finish_reason == "length":
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="unavailable",
+                round_number=round_number,
+                error_message="Truncated response: model output hit max_tokens limit before finishing JSON vote.",
+            )
+
+        content = choice.get("message", {}).get("content", "")
+        parsed = extract_and_repair_json(content)
+        is_valid, norm, err = validate_and_normalize_vote(parsed)
+
+        if not is_valid:
+            return IndividualVote(
+                provider_name=self.name,
+                display_name=self.display_name,
+                model_id=self.model_id,
+                model_family=self.model_family,
+                model_used=model_name_used,
+                is_fallback=is_fallback_model,
+                status="unavailable",
+                round_number=round_number,
+                error_message=f"Invalid response: failed to parse JSON vote from model ({err}).",
+            )
+
+        return IndividualVote(
+            provider_name=self.name,
+            display_name=self.display_name,
+            model_id=self.model_id,
+            model_family=self.model_family,
+            model_used=model_name_used,
+            is_fallback=is_fallback_model,
+            status="success",
+            verdict=norm["verdict"],
+            confidence=norm["confidence"],
+            reasoning=norm["reasoning"],
+            risks=norm["risks"],
+            conditions=norm["conditions"],
+            suggested_amount=norm["suggested_amount"],
+            round_number=round_number,
+        )
 
     async def _execute_query(
         self,
@@ -266,177 +463,106 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         timeout_seconds: int,
         round_number: int,
     ) -> IndividualVote:
+        # Up to 2 retries (3 attempts total) on transient errors (502, 503, 529, 429, overloaded)
+        last_vote: Optional[IndividualVote] = None
+
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                res = await client.post(endpoint, json=payload, headers=headers)
-
-                # Auto-retry without thinking/reasoning parameters if rejected with 400 or 422
-                if res.status_code in (400, 422) and any(k in payload for k in ("chat_template_kwargs", "reasoning", "reasoning_effort")):
-                    is_unsupported = False
+                for attempt in range(3):
                     try:
-                        err_data = res.json()
-                        err_obj = err_data.get("error", {}) if isinstance(err_data, dict) else {}
-                        code = str(err_obj.get("code", "")).lower()
-                        param = str(err_obj.get("param", "")).lower()
-                        err_type = str(err_obj.get("type", "")).lower()
-                        err_msg = str(err_obj.get("message", "")).lower()
-                    except Exception:
-                        code, param, err_type, err_msg = "", "", "", res.text.lower()
+                        vote = await self._execute_single_attempt(
+                            client=client,
+                            endpoint=endpoint,
+                            payload=payload,
+                            headers=headers,
+                            model_name_used=self.model_id,
+                            is_fallback_model=False,
+                            round_number=round_number,
+                        )
+                        last_vote = vote
 
-                    if param in ("chat_template_kwargs", "reasoning_effort", "reasoning", "enable_thinking", "clear_thinking", "thinkingconfig", "thinkingbudget", "thinkinglevel"):
-                        is_unsupported = True
-                    elif code in ("unrecognized_parameter", "unsupported_parameter", "invalid_parameter", "unknown_parameter"):
-                        is_unsupported = True
-                    elif any(t in err_msg for t in ("chat_template_kwargs", "enable_thinking", "clear_thinking", "reasoning_effort", "reasoning", "thinking", "unknown parameter", "unrecognized", "extra fields not permitted", "unexpected field", "invalid argument", "not supported")):
-                        is_unsupported = True
+                        if vote.status == "success":
+                            return vote
 
-                    if is_unsupported:
-                        _UNSUPPORTED_THINKING_PROVIDERS.add(self.name)
-                        try:
-                            from app.db.session import SessionLocal
-                            from app.services.council.health_manager import record_thinking_support_db
-                            with SessionLocal() as db_sess:
-                                record_thinking_support_db(db_sess, self.name, self.model_id, supported=False)
-                        except Exception:
-                            pass
+                        # Determine if error is transient and eligible for retry
+                        is_transient = (
+                            vote.status == "rate_limited"
+                            or (vote.error_message and any(
+                                t in vote.error_message.lower()
+                                for t in ("503", "502", "529", "overloaded", "rate limit", "temporarily unavailable", "capacity")
+                            ))
+                        )
 
-                        retry_payload = {
-                            k: v for k, v in payload.items()
-                            if k not in ("chat_template_kwargs", "reasoning", "reasoning_effort")
-                        }
-                        res = await client.post(endpoint, json=retry_payload, headers=headers)
+                        if is_transient and attempt < 2:
+                            # Exponential backoff + jitter (honour Retry-After + 0.5s + jitter)
+                            if vote.status == "rate_limited" and "Retry in" in (vote.error_message or ""):
+                                import re
+                                m = re.search(r'Retry in (\d+) seconds', vote.error_message or "")
+                                retry_secs = int(m.group(1)) if m else 1
+                                delay = retry_secs + 0.5 + random.uniform(0.05, 0.3)
+                            else:
+                                delay = (0.75 * (2 ** attempt)) + 0.5 + random.uniform(0.05, 0.3)
+                            await asyncio.sleep(delay)
+                            continue
 
-                # Exponential backoff / Retry-After handling on 429
-                if res.status_code == 429:
-                    retry_after_str = res.headers.get("Retry-After")
-                    retry_secs = parse_retry_after(retry_after_str)
-                    if retry_secs <= 5:
-                        await asyncio.sleep(retry_secs)
-                        res = await client.post(endpoint, json=payload, headers=headers)
-                        if res.status_code == 429:
-                            new_retry_str = res.headers.get("Retry-After")
-                            new_retry_secs = parse_retry_after(new_retry_str) or retry_secs
-                            return IndividualVote(
-                                provider_name=self.name,
-                                display_name=self.display_name,
-                                model_id=self.model_id,
-                                model_family=self.model_family,
-                                status="rate_limited",
-                                round_number=round_number,
-                                error_message=f"Provider rate limit reached (HTTP 429). Retry in {new_retry_secs} seconds.",
-                            )
-                    else:
-                        return IndividualVote(
+                        # If not transient or out of retries, break loop to consider fallback model
+                        break
+
+                    except httpx.TimeoutException:
+                        last_vote = IndividualVote(
                             provider_name=self.name,
                             display_name=self.display_name,
                             model_id=self.model_id,
                             model_family=self.model_family,
-                            status="rate_limited",
+                            model_used=self.model_id,
+                            is_fallback=False,
+                            status="timeout",
                             round_number=round_number,
-                            error_message=f"Provider rate limit reached (HTTP 429). Retry in {retry_secs} seconds.",
+                            error_message=f"Request timed out after {timeout_seconds}s.",
                         )
+                        if attempt < 2:
+                            delay = (0.75 * (2 ** attempt)) + 0.5 + random.uniform(0.05, 0.3)
+                            await asyncio.sleep(delay)
+                            continue
+                        break
 
-                if res.status_code == 401 or res.status_code == 403:
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="failed",
-                        round_number=round_number,
-                        error_message=f"Invalid API Key: Provider rejected authentication (HTTP {res.status_code}).",
-                    )
+                # If primary model failed after retries and fallback_model_id is configured, attempt fallback
+                if (
+                    last_vote
+                    and last_vote.status != "success"
+                    and self.fallback_model_id
+                    and self.fallback_model_id.strip()
+                    and self.fallback_model_id.strip() != self.model_id.strip()
+                ):
+                    fallback_payload = dict(payload)
+                    fallback_payload["model"] = self.fallback_model_id.strip()
+                    try:
+                        fb_vote = await self._execute_single_attempt(
+                            client=client,
+                            endpoint=endpoint,
+                            payload=fallback_payload,
+                            headers=headers,
+                            model_name_used=self.fallback_model_id.strip(),
+                            is_fallback_model=True,
+                            round_number=round_number,
+                        )
+                        if fb_vote.status == "success":
+                            return fb_vote
+                    except Exception:
+                        pass
 
-                if res.status_code == 402:
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="unavailable",
-                        round_number=round_number,
-                        error_message="Provider credits exhausted / payment required (HTTP 402). Model unavailable.",
-                    )
-
-                if res.status_code == 404:
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="unavailable",
-                        round_number=round_number,
-                        error_message=f"Model ID '{self.model_id}' not found or deprecated by provider (HTTP 404). Model unavailable.",
-                    )
-
-                if res.status_code != 200:
-                    clean_err = redact_sensitive_info(res.text[:200])
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="failed",
-                        round_number=round_number,
-                        error_message=f"HTTP {res.status_code}: {clean_err}",
-                    )
-
-                data = res.json()
-                choice = data.get("choices", [{}])[0]
-                finish_reason = choice.get("finish_reason")
-
-                # Detect truncation caused by hitting max_tokens budget
-                if finish_reason == "length":
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="unavailable",
-                        round_number=round_number,
-                        error_message="Truncated response: model output hit max_tokens limit before finishing JSON vote.",
-                    )
-
-                content = choice.get("message", {}).get("content", "")
-                parsed = extract_and_repair_json(content)
-                is_valid, norm, err = validate_and_normalize_vote(parsed)
-
-                if not is_valid:
-                    return IndividualVote(
-                        provider_name=self.name,
-                        display_name=self.display_name,
-                        model_id=self.model_id,
-                        model_family=self.model_family,
-                        status="unavailable",
-                        round_number=round_number,
-                        error_message=f"Invalid response: failed to parse JSON vote from model ({err}).",
-                    )
-
-                return IndividualVote(
+                return last_vote or IndividualVote(
                     provider_name=self.name,
                     display_name=self.display_name,
                     model_id=self.model_id,
                     model_family=self.model_family,
-                    status="success",
-                    verdict=norm["verdict"],
-                    confidence=norm["confidence"],
-                    reasoning=norm["reasoning"],
-                    risks=norm["risks"],
-                    conditions=norm["conditions"],
-                    suggested_amount=norm["suggested_amount"],
+                    model_used=self.model_id,
+                    is_fallback=False,
+                    status="failed",
                     round_number=round_number,
+                    error_message="All retry attempts failed.",
                 )
 
-        except httpx.TimeoutException:
-            return IndividualVote(
-                provider_name=self.name,
-                display_name=self.display_name,
-                model_id=self.model_id,
-                model_family=self.model_family,
-                status="timeout",
-                round_number=round_number,
-                error_message=f"Request timed out after {timeout_seconds}s.",
-            )
         except Exception as e:
             clean_exc = redact_sensitive_info(str(e))
             return IndividualVote(
@@ -444,7 +570,10 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 display_name=self.display_name,
                 model_id=self.model_id,
                 model_family=self.model_family,
+                model_used=self.model_id,
+                is_fallback=False,
                 status="failed",
                 round_number=round_number,
                 error_message=clean_exc,
             )
+

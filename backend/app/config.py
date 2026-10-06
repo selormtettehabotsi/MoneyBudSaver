@@ -66,25 +66,42 @@ class Settings(BaseSettings):
     # Provider API Keys & Model IDs (at least 5 different model families)
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL_ID: str = "gemini-3.8-flash"
+    GEMINI_FALLBACK_MODEL_ID: Optional[str] = None
+    GEMINI_MODEL_FAMILY: Optional[str] = None
 
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL_ID: str = "openai/gpt-oss-120b"
+    GROQ_FALLBACK_MODEL_ID: Optional[str] = None
+    GROQ_MODEL_FAMILY: Optional[str] = None
 
     MISTRAL_API_KEY: Optional[str] = None
     MISTRAL_MODEL_ID: str = "mistral-small-latest"
+    MISTRAL_FALLBACK_MODEL_ID: Optional[str] = None
+    MISTRAL_MODEL_FAMILY: Optional[str] = None
 
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_MODEL_ID: str = "qwen/qwen3.8-27b:free"
+    OPENROUTER_FALLBACK_MODEL_ID: Optional[str] = None
+    OPENROUTER_MODEL_FAMILY: Optional[str] = None
 
     NVIDIA_API_KEY: Optional[str] = None
     NVIDIA_MODEL_ID: str = "z-ai/glm-5.3-flash"
+    NVIDIA_FALLBACK_MODEL_ID: Optional[str] = None
+    NVIDIA_MODEL_FAMILY: Optional[str] = None
+
     NVIDIA_KIMI_MODEL_ID: Optional[str] = "moonshotai/kimi-k3"
+    NVIDIA_KIMI_FALLBACK_MODEL_ID: Optional[str] = None
+    NVIDIA_KIMI_MODEL_FAMILY: Optional[str] = None
 
     CEREBRAS_API_KEY: Optional[str] = None
     CEREBRAS_MODEL_ID: str = "llama3.3-70b"
+    CEREBRAS_FALLBACK_MODEL_ID: Optional[str] = None
+    CEREBRAS_MODEL_FAMILY: Optional[str] = None
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_ID: str = "llama3.2"
+    OLLAMA_FALLBACK_MODEL_ID: Optional[str] = None
+    OLLAMA_MODEL_FAMILY: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

@@ -1,8 +1,8 @@
 """
 Service for testing AI Council provider connections, verifying credentials,
 measuring latency & TTFT with fixed non-financial test prompts, and querying model catalogs with pricing.
-Supports streaming time-to-first-token (TTFT), 30s TTFT detection, two-probe NVIDIA hanging parameter diagnosis,
-OpenRouter free model catalog extraction with privacy hint, and circuit breaker recording.
+Supports chat-capable model filtering, non-misleading catalog labeling, rate pacing,
+concurrent 45s NVIDIA probes with capacity diagnosis & alternative suggestions, and median TTFT recording.
 """
 import asyncio
 import difflib
@@ -19,6 +19,7 @@ from app.schemas.council import TestConnectionResponse
 from app.services.council.base_adapter import (
     _UNSUPPORTED_THINKING_PROVIDERS,
     parse_retry_after,
+    wait_for_provider_pacing,
 )
 from app.services.council.gemini_adapter import get_gemini_thinking_config
 from app.services.council.health_manager import (
@@ -27,6 +28,8 @@ from app.services.council.health_manager import (
     record_provider_success,
     record_provider_test_result,
     record_provider_failure,
+    record_provider_ttft,
+    get_provider_median_ttft,
 )
 from app.services.council.json_repair import extract_and_repair_json
 
@@ -35,8 +38,63 @@ TEST_SYSTEM_INSTRUCTION = "You are an automated JSON connectivity test agent. Ou
 TTFT_THRESHOLD_SECONDS = 30.0
 
 
+def is_chat_capable_model(
+    mid: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    provider_name: str = "",
+) -> bool:
+    """
+    Filters catalog lists to chat-capable models:
+    Excludes embeddings, audio/speech (whisper, tts), image generation, moderation/guard, and rerank models.
+    Uses provider metadata where it exists (Gemini supportedGenerationMethods, OpenRouter output modalities)
+    and name-based rules as a fallback.
+    """
+    if not mid or not mid.strip():
+        return False
+
+    mid_clean = mid.lower().strip()
+
+    # 1. Provider metadata checks
+    if metadata and isinstance(metadata, dict):
+        # Google Gemini metadata: supportedGenerationMethods
+        gen_methods = metadata.get("supportedGenerationMethods", [])
+        if gen_methods and isinstance(gen_methods, list):
+            if "generateContent" not in gen_methods:
+                return False
+
+        # OpenRouter metadata: architecture.output_modalities / modality
+        arch = metadata.get("architecture", {})
+        if isinstance(arch, dict):
+            out_modalities = arch.get("output_modalities", [])
+            modality = arch.get("modality", "")
+            if out_modalities and "text" not in out_modalities:
+                return False
+            if modality and "text" not in modality:
+                return False
+
+    # 2. Name-based rule fallback
+    # Embeddings
+    if any(k in mid_clean for k in ("embed", "-embedding", "/embedding", "text-embedding", "bge-large", "bge-small", "bge-base")):
+        return False
+    # Audio / Speech / TTS
+    if any(k in mid_clean for k in ("whisper", "tts", "text-to-speech", "speech", "voice", "audio", "orpheus", "seamless")):
+        return False
+    # Image Gen / Vision-only output
+    if any(k in mid_clean for k in ("dall-e", "imagen", "flux", "stable-diffusion", "sdxl", "midjourney", "image-generation", "instruct-pix2pix", "upscale")):
+        return False
+    # Moderation / Safety Guard
+    if any(k in mid_clean for k in ("guard", "shieldgemma", "moderation", "safety-guard", "llama-guard", "wildguard")):
+        return False
+    # Rerankers
+    if any(k in mid_clean for k in ("rerank", "reranker", "bge-rerank")):
+        return False
+
+    return True
+
+
 async def _fetch_models_gemini(api_key: str) -> List[Tuple[str, bool]]:
-    """Fetch model IDs from Google Gemini API via x-goog-api-key header (free tier by default)."""
+    """Fetch chat-capable model IDs from Google Gemini API via x-goog-api-key header."""
+    await wait_for_provider_pacing("gemini")
     url = "https://generativelanguage.googleapis.com/v1beta/models"
     headers = {"x-goog-api-key": api_key}
     async with httpx.AsyncClient(timeout=10) as client:
@@ -48,8 +106,8 @@ async def _fetch_models_gemini(api_key: str) -> List[Tuple[str, bool]]:
         for m in data.get("models", []):
             name = m.get("name", "")
             clean_name = name.replace("models/", "")
-            if clean_name:
-                models.append((clean_name, True))  # Gemini public tier is free-tier capable
+            if clean_name and is_chat_capable_model(clean_name, metadata=m, provider_name="gemini"):
+                models.append((clean_name, False))
         return models
 
 
@@ -57,11 +115,14 @@ async def _fetch_models_openai_compatible(
     base_url: str,
     api_key: Optional[str] = None,
     is_openrouter: bool = False,
+    provider_name: str = "",
 ) -> Tuple[List[str], List[str], Dict[str, bool]]:
     """
-    Fetch model IDs from OpenAI-compatible /models endpoint.
-    Returns: (all_model_ids, free_model_ids, is_free_map)
+    Fetch chat-capable model IDs from OpenAI-compatible /models endpoint.
+    Only OpenRouter pricing data determines 'Free' badge. For other providers, missing pricing is not free.
+    Returns: (all_chat_model_ids, free_model_ids, is_free_map)
     """
+    await wait_for_provider_pacing(provider_name)
     url = f"{base_url.rstrip('/')}/models"
     headers = {}
     if api_key:
@@ -83,27 +144,41 @@ async def _fetch_models_openai_compatible(
         for item in items:
             if isinstance(item, dict):
                 mid = item.get("id") or item.get("name") or item.get("model")
-                if not mid:
+                if not mid or not is_chat_capable_model(mid, metadata=item, provider_name=provider_name):
                     continue
-                pricing = item.get("pricing", {})
-                prompt_price = float(pricing.get("prompt") or 0.0)
-                comp_price = float(pricing.get("completion") or 0.0)
 
-                is_free = (prompt_price == 0.0 and comp_price == 0.0) or ":free" in mid or not is_openrouter
+                if is_openrouter:
+                    pricing = item.get("pricing")
+                    if isinstance(pricing, dict) and "prompt" in pricing and "completion" in pricing and pricing.get("prompt") is not None and pricing.get("completion") is not None:
+                        try:
+                            prompt_price = float(pricing.get("prompt"))
+                            comp_price = float(pricing.get("completion"))
+                            is_free = (prompt_price == 0.0 and comp_price == 0.0)
+                        except (ValueError, TypeError):
+                            is_free = False
+                    elif ":free" in mid:
+                        is_free = True
+                    else:
+                        is_free = False
+                else:
+                    is_free = False
+
                 model_ids.append(mid)
                 is_free_map[mid] = is_free
                 if is_free:
                     free_models.append(mid)
             elif isinstance(item, str):
-                model_ids.append(item)
-                is_free_map[item] = True
+                if is_chat_capable_model(item, provider_name=provider_name):
+                    model_ids.append(item)
+                    is_free_map[item] = False
 
         free_models.sort()
         return model_ids, free_models, is_free_map
 
 
 async def _fetch_models_ollama(base_url: str) -> List[str]:
-    """Fetch model IDs from Ollama (100% local/free)."""
+    """Fetch model IDs from Ollama (100% local/private)."""
+    await wait_for_provider_pacing("ollama")
     url = f"{base_url.rstrip('/')}/api/tags"
     async with httpx.AsyncClient(timeout=5) as client:
         res = await client.get(url)
@@ -113,10 +188,10 @@ async def _fetch_models_ollama(base_url: str) -> List[str]:
         models: List[str] = []
         for m in data.get("models", []):
             name = m.get("name", "")
-            if name:
+            if name and is_chat_capable_model(name, provider_name="ollama"):
                 models.append(name)
                 tagless = name.split(":")[0]
-                if tagless not in models:
+                if tagless not in models and is_chat_capable_model(tagless, provider_name="ollama"):
                     models.append(tagless)
         return models
 
@@ -142,7 +217,7 @@ async def verify_provider_connectivity(
 ) -> TestConnectionResponse:
     """
     Tests a single provider's connection with configured timeouts, streaming TTFT,
-    two-probe NVIDIA hang diagnosis, pricing tags, and circuit breaker recording.
+    rate pacing across call types, concurrent 45s NVIDIA probes, pricing badges, and median TTFT tracking.
     """
     custom_models = (user_settings or {}).get("custom_model_ids", {})
     custom_timeouts = (user_settings or {}).get("custom_timeouts", {})
@@ -267,17 +342,23 @@ async def verify_provider_connectivity(
             g_models = await _fetch_models_gemini(api_key)
             available_models = [m[0] for m in g_models]
             is_free_map = {m[0]: m[1] for m in g_models}
-            free_models_list = list(available_models)
+            free_models_list = []
         elif is_ollama:
             available_models = await _fetch_models_ollama(base_url)
-            is_free_map = {m: True for m in available_models}
-            free_models_list = list(available_models)
+            is_free_map = {m: False for m in available_models}
+            free_models_list = []
         elif base_url:
             available_models, free_models_list, is_free_map = await _fetch_models_openai_compatible(
-                base_url, api_key, is_openrouter=is_openrouter
+                base_url, api_key, is_openrouter=is_openrouter, provider_name=provider_name_lower
             )
     except Exception:
         pass
+
+    # Free label rule: Only OpenRouter publishes prices.
+    if is_openrouter:
+        available_models_label = "Free models on OpenRouter"
+    else:
+        available_models_label = "Models available to your key (free-tier eligibility not published by this provider)"
 
     model_found_in_list: Optional[bool] = None
     close_matches: List[str] = []
@@ -296,13 +377,18 @@ async def verify_provider_connectivity(
                 n=5,
                 cutoff=0.25,
             )
-            # Label suggestions with [Free] or [Paid]
-            close_matches = [
-                f"{m} [Free]" if is_free_map.get(m, False) or ":free" in m else f"{m} [Paid]"
-                for m in raw_matches
-            ]
+            if is_openrouter:
+                close_matches = [
+                    f"{m} [Free]" if is_free_map.get(m, False) or ":free" in m else m
+                    for m in raw_matches
+                ]
+            else:
+                close_matches = list(raw_matches)
 
-    # 2. Execute Probe (with TTFT streaming and two-probe NVIDIA diagnosis)
+    # 2. Rate pacing wait between catalog call and chat probe
+    await wait_for_provider_pacing(provider_name_lower)
+
+    # 3. Execute Chat Probes
     start_time = time.perf_counter()
     ttft_ms: Optional[int] = None
     retry_after_seconds: Optional[int] = None
@@ -310,12 +396,13 @@ async def verify_provider_connectivity(
     diagnosis = "Connection verified successfully."
     test_status = "success"
     chat_status = "ok"
+    alternative_models: List[str] = []
 
     is_nvidia = provider_name_lower in ("nvidia", "nvidia_kimi")
 
-    async def run_single_probe(include_extras: bool) -> Tuple[int, Optional[int], Optional[str], Optional[int], str]:
+    async def run_single_probe(include_extras: bool, timeout_sec: float) -> Tuple[int, Optional[int], Optional[str], Optional[int], str]:
         """
-        Executes a streaming probe with TTFT measurement.
+        Executes a test probe with TTFT measurement.
         Returns: (http_status, ttft_ms, error_text_or_json, retry_after_sec, probe_status)
         """
         p_start = time.perf_counter()
@@ -341,7 +428,7 @@ async def verify_provider_connectivity(
                 "contents": [{"role": "user", "parts": [{"text": TEST_PING_PROMPT}]}],
                 "generationConfig": gen_cfg,
             }
-            async with httpx.AsyncClient(timeout=eff_timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout_sec) as client:
                 res = await client.post(url, headers=headers, json=payload)
                 p_ttft = int((time.perf_counter() - p_start) * 1000)
                 r_after = parse_retry_after(res.headers.get("Retry-After")) if res.status_code == 429 else None
@@ -373,60 +460,154 @@ async def verify_provider_connectivity(
                     payload["chat_template_kwargs"] = {"clear_thinking": True, "enable_thinking": False}
                     payload["reasoning_effort"] = "low"
 
-            async with httpx.AsyncClient(timeout=eff_timeout) as client:
-                # Use standard post (compatible across mock & real streams)
+            async with httpx.AsyncClient(timeout=timeout_sec) as client:
                 res = await client.post(endpoint, json=payload, headers=headers)
                 p_ttft = int((time.perf_counter() - p_start) * 1000)
                 r_after = parse_retry_after(res.headers.get("Retry-After")) if res.status_code == 429 else None
                 return res.status_code, p_ttft, res.text, r_after, ("ok" if res.status_code == 200 else "error")
 
     try:
-        # Probe 1: Primary probe with current extras
-        h_status, probe_ttft, resp_text, r_after, p_status = await run_single_probe(include_extras=True)
-        http_status = h_status
-        ttft_ms = probe_ttft
-        retry_after_seconds = r_after
+        if is_nvidia:
+            # NVIDIA: Cap diagnostic probes at 45s and run Probe 1 & Probe 2 concurrently
+            nvidia_probe_timeout = 45.0
+            p1_task = run_single_probe(include_extras=True, timeout_sec=nvidia_probe_timeout)
+            p2_task = run_single_probe(include_extras=False, timeout_sec=nvidia_probe_timeout)
+            results = await asyncio.gather(p1_task, p2_task, return_exceptions=True)
 
-        # Auto-retry on 400 or 422 if thinking parameter unsupported
-        if http_status in (400, 422):
-            is_unsupp = False
-            try:
-                err_data = json.loads(resp_text)
-                err_obj = err_data.get("error", {}) if isinstance(err_data, dict) else {}
-                code = str(err_obj.get("code", "")).lower()
-                param = str(err_obj.get("param", "")).lower()
-                err_msg = str(err_obj.get("message", "")).lower()
-            except Exception:
-                code, param, err_msg = "", "", (resp_text or "").lower()
+            res1, res2 = results[0], results[1]
+            p1_ok = not isinstance(res1, Exception) and res1[0] == 200
+            p2_ok = not isinstance(res2, Exception) and res2[0] == 200
 
-            if param in ("chat_template_kwargs", "reasoning_effort", "reasoning", "enable_thinking", "clear_thinking", "thinkingconfig", "thinkingbudget", "thinkinglevel"):
-                is_unsupp = True
-            elif code in ("unrecognized_parameter", "unsupported_parameter", "invalid_parameter"):
-                is_unsupp = True
-            elif any(t in err_msg for t in ("chat_template_kwargs", "enable_thinking", "clear_thinking", "reasoning_effort", "reasoning", "thinking", "unknown parameter", "unrecognized", "extra fields not permitted", "unexpected field", "invalid argument")):
-                is_unsupp = True
-
-            if is_unsupp:
+            if p1_ok:
+                http_status = res1[0]
+                ttft_ms = res1[1]
+                resp_text = res1[2]
+                test_status = "success"
+                chat_status = "ok"
+                diagnosis = "Connection verified successfully."
+            elif p2_ok:
+                http_status = res2[0]
+                ttft_ms = res2[1]
+                resp_text = res2[2]
+                test_status = "success"
+                chat_status = "ok"
+                diagnosis = "Parameter probe timed out, clean probe succeeded: thinking parameters caused hang (thinking control not supported)."
                 _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
                 try:
-                    with SessionLocal() as db_sess:
-                        record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
+                    db_sess = db or _get_tester_db_session()
+                    record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
                 except Exception:
                     pass
+            else:
+                # Both probes failed
+                probe_status = None
+                probe_resp_text = ""
+                probe_retry_after = None
+                for r in (res1, res2):
+                    if not isinstance(r, Exception):
+                        probe_status = r[0]
+                        probe_resp_text = r[2]
+                        probe_retry_after = r[3]
+                        break
 
-                # Retry clean probe
-                h_status2, probe_ttft2, resp_text2, r_after2, _ = await run_single_probe(include_extras=False)
-                http_status = h_status2
-                ttft_ms = probe_ttft2
-                resp_text = resp_text2
-                retry_after_seconds = r_after2
-                if http_status == 200:
-                    diagnosis = "Connection verified (thinking control not supported)."
+                if probe_status in (401, 403):
+                    http_status = probe_status
+                    test_status = "invalid_key"
+                    chat_status = "invalid_key"
+                    diagnosis = f"Invalid API Key: Provider rejected authentication (HTTP {probe_status})."
+                elif probe_status == 404:
+                    http_status = 404
+                    test_status = "model_not_found"
+                    chat_status = "model_not_found"
+                    diagnosis = f"Model ID '{resolved_model_id}' not found by provider (HTTP 404)."
+                elif probe_status == 429:
+                    http_status = 429
+                    test_status = "rate_limited"
+                    chat_status = "rate_limited"
+                    retry_after_seconds = probe_retry_after
+                    r_sec = retry_after_seconds or 5
+                    diagnosis = f"Provider rate limit reached (HTTP 429). Retry in {r_sec} seconds."
+                else:
+                    test_status = "timeout"
+                    chat_status = "timeout"
+                    http_status = probe_status if probe_status else 504
+                    diagnosis = "NVIDIA NIM timed out on both parameter and clean probes (capped at 45s): provider-side capacity issue."
+                    alt_models = [m for m in available_models if m.lower() != resolved_model_id.lower()][:3]
+                    alternative_models = alt_models
+                    if alt_models:
+                        diagnosis += f" Suggested alternatives: {', '.join(alt_models)}"
+                    resp_text = probe_resp_text
 
-        if http_status == 200:
-            test_status = "success"
-            chat_status = "ok"
-            # Extract inner content from provider envelope if structured
+        else:
+            # Standard single probe with parameter fallback
+            h_status, probe_ttft, resp_text, r_after, p_status = await run_single_probe(
+                include_extras=True, timeout_sec=float(eff_timeout)
+            )
+            http_status = h_status
+            ttft_ms = probe_ttft
+            retry_after_seconds = r_after
+
+            # Auto-retry on 400 or 422 if thinking parameter unsupported
+            if http_status in (400, 422):
+                is_unsupp = False
+                try:
+                    err_data = json.loads(resp_text)
+                    err_obj = err_data.get("error", {}) if isinstance(err_data, dict) else {}
+                    code = str(err_obj.get("code", "")).lower()
+                    param = str(err_obj.get("param", "")).lower()
+                    err_msg = str(err_obj.get("message", "")).lower()
+                except Exception:
+                    code, param, err_msg = "", "", (resp_text or "").lower()
+
+                if param in ("chat_template_kwargs", "reasoning_effort", "reasoning", "enable_thinking", "clear_thinking", "thinkingconfig", "thinkingbudget", "thinkinglevel"):
+                    is_unsupp = True
+                elif code in ("unrecognized_parameter", "unsupported_parameter", "invalid_parameter"):
+                    is_unsupp = True
+                elif any(t in err_msg for t in ("chat_template_kwargs", "enable_thinking", "clear_thinking", "reasoning_effort", "reasoning", "thinking", "unknown parameter", "unrecognized", "extra fields not permitted", "unexpected field", "invalid argument")):
+                    is_unsupp = True
+
+                if is_unsupp:
+                    _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
+                    try:
+                        with SessionLocal() as db_sess:
+                            record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
+                    except Exception:
+                        pass
+
+                    h_status2, probe_ttft2, resp_text2, r_after2, _ = await run_single_probe(
+                        include_extras=False, timeout_sec=float(eff_timeout)
+                    )
+                    http_status = h_status2
+                    ttft_ms = probe_ttft2
+                    resp_text = resp_text2
+                    retry_after_seconds = r_after2
+                    if http_status == 200:
+                        diagnosis = "Connection verified (thinking control not supported)."
+
+            if http_status == 200:
+                test_status = "success"
+                chat_status = "ok"
+            elif http_status in (401, 403):
+                test_status = "invalid_key"
+                chat_status = "invalid_key"
+                diagnosis = f"Invalid API Key: Provider rejected authentication (HTTP {http_status})."
+            elif http_status == 404:
+                test_status = "model_not_found"
+                chat_status = "model_not_found"
+                diagnosis = f"Model ID '{resolved_model_id}' not found by provider (HTTP 404)."
+            elif http_status == 429:
+                test_status = "rate_limited"
+                chat_status = "rate_limited"
+                r_sec = retry_after_seconds or 5
+                diagnosis = f"Provider rate limit reached (HTTP 429). Retry in {r_sec} seconds."
+            else:
+                test_status = "error"
+                chat_status = "error"
+                clean_err = redact_sensitive_info((resp_text or "")[:120])
+                diagnosis = f"Provider returned HTTP {http_status}: {clean_err}"
+
+        # JSON response validation on 200
+        if http_status == 200 and resp_text:
             raw_content = resp_text
             try:
                 outer_json = json.loads(resp_text)
@@ -449,55 +630,11 @@ async def verify_provider_connectivity(
                 test_status = "bad_json"
                 chat_status = "bad_json"
                 diagnosis = "Model returned unparsable or malformed JSON test response."
-        elif http_status in (401, 403):
-            test_status = "invalid_key"
-            chat_status = "invalid_key"
-            diagnosis = f"Invalid API Key: Provider rejected authentication (HTTP {http_status})."
-        elif http_status == 404:
-            test_status = "model_not_found"
-            chat_status = "model_not_found"
-            diagnosis = f"Model ID '{resolved_model_id}' not found by provider (HTTP 404)."
-        elif http_status == 429:
-            test_status = "rate_limited"
-            chat_status = "rate_limited"
-            r_sec = retry_after_seconds or 5
-            diagnosis = f"Provider rate limit reached (HTTP 429). Retry in {r_sec} seconds."
-        else:
-            test_status = "error"
-            chat_status = "error"
-            clean_err = redact_sensitive_info((resp_text or "")[:120])
-            diagnosis = f"Provider returned HTTP {http_status}: {clean_err}"
 
     except httpx.TimeoutException:
-        # Two-probe NVIDIA diagnosis on timeout
-        if is_nvidia:
-            try:
-                # Run Probe 2 (clean payload without thinking parameters)
-                h2, tt2, txt2, r2, p2 = await run_single_probe(include_extras=False)
-                if h2 == 200:
-                    test_status = "success"
-                    chat_status = "ok"
-                    http_status = 200
-                    ttft_ms = tt2
-                    diagnosis = "Parameter probe timed out, clean probe succeeded: thinking parameters caused hang."
-                    _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
-                    try:
-                        db_sess = db or _get_tester_db_session()
-                        record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
-                    except Exception:
-                        pass
-                else:
-                    test_status = "timeout"
-                    chat_status = "timeout"
-                    diagnosis = f"Both parameter probe and clean probe timed out after {eff_timeout}s."
-            except Exception:
-                test_status = "timeout"
-                chat_status = "timeout"
-                diagnosis = f"Both parameter probe and clean probe timed out after {eff_timeout}s."
-        else:
-            test_status = "timeout"
-            chat_status = "timeout"
-            diagnosis = f"Connection timed out after {eff_timeout} seconds."
+        test_status = "timeout"
+        chat_status = "timeout"
+        diagnosis = f"Connection timed out after {eff_timeout} seconds."
 
     except Exception as e:
         test_status = "error"
@@ -514,8 +651,24 @@ async def verify_provider_connectivity(
         if "privacy settings" not in diagnosis:
             diagnosis += f" {privacy_hint}"
 
-    # Determine is_free status for tested model
-    is_free_val = is_free_map.get(resolved_model_id, (":free" in resolved_model_id or is_ollama or is_gemini))
+    # Determine is_free status (only OpenRouter publishes pricing)
+    is_free_val = is_free_map.get(resolved_model_id, False) if is_openrouter else False
+
+    # Record TTFT sample in DB
+    if ttft_ms is not None and ttft_ms > 0:
+        try:
+            db_sess = db or _get_tester_db_session()
+            record_provider_ttft(db_sess, provider_name_lower, ttft_ms)
+        except Exception:
+            pass
+
+    # Retrieve rolling median TTFT
+    median_ttft: Optional[int] = None
+    try:
+        db_sess = db or _get_tester_db_session()
+        median_ttft = get_provider_median_ttft(db_sess, provider_name_lower)
+    except Exception:
+        pass
 
     # Record in Circuit Breaker database
     try:
@@ -526,10 +679,9 @@ async def verify_provider_connectivity(
             "latency_ms": latency_ms,
             "diagnosis": diagnosis,
         }
-        if test_status in ("success",):
+        if test_status == "success":
             record_provider_success(db_sess, provider_name_lower, res_dict)
         else:
-            # Test button calls must NOT count toward the 3-failure threshold
             record_provider_test_result(db_sess, provider_name_lower, res_dict)
     except Exception:
         pass
@@ -544,9 +696,12 @@ async def verify_provider_connectivity(
         catalog_ok=bool(model_found_in_list),
         chat_status=chat_status,
         ttft_ms=ttft_ms,
+        median_ttft_ms=median_ttft,
         retry_after_seconds=retry_after_seconds,
         is_free=is_free_val,
         free_models=free_models_list,
+        available_models_label=available_models_label,
+        alternative_models=alternative_models,
         privacy_hint=privacy_hint,
         model_found_in_list=model_found_in_list,
         available_models_count=len(available_models),

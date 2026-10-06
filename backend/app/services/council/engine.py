@@ -77,10 +77,24 @@ def _calculate_tally(votes: List[IndividualVote], min_quorum: Optional[int] = No
     Computes the confidence-weighted tally, enforces quorum requirements, and synthesizes consensus & dissent.
     Scoring: approve=+1.0, approve_with_conditions=+0.5, reject=-1.0.
     If valid votes < min_quorum (default 3), returns 'no_quorum' verdict.
+    Calculates dynamic family diversity and warns when fewer than 4 distinct model families participated.
     """
     quorum_threshold = min_quorum if min_quorum is not None else settings.COUNCIL_MIN_QUORUM_VOTES
     successful_votes = [v for v in votes if v.status == "success" and v.verdict is not None]
     skipped_votes = len(votes) - len(successful_votes)
+
+    working_families = {v.model_family for v in successful_votes if v.model_family}
+    active_families = sorted(list(working_families))
+    active_families_count = len(working_families)
+
+    diversity_warning: Optional[str] = None
+    if active_families_count < 4:
+        diversity_warning = (
+            f"Low council diversity: Only {active_families_count} distinct model "
+            f"{'family' if active_families_count == 1 else 'families'} "
+            f"({', '.join(active_families) if active_families else 'none'}) participated. "
+            "At least 4 distinct families are recommended for robust multi-perspective deliberation."
+        )
 
     # 1. Quorum check
     if len(successful_votes) < quorum_threshold:
@@ -102,6 +116,9 @@ def _calculate_tally(votes: List[IndividualVote], min_quorum: Optional[int] = No
             total_votes_skipped=skipped_votes,
             min_quorum_required=quorum_threshold,
             has_quorum=False,
+            diversity_warning=diversity_warning,
+            active_families_count=active_families_count,
+            active_families=active_families,
         )
 
     total_weight = 0.0
@@ -182,7 +199,11 @@ def _calculate_tally(votes: List[IndividualVote], min_quorum: Optional[int] = No
         total_votes_skipped=skipped_votes,
         min_quorum_required=quorum_threshold,
         has_quorum=True,
+        diversity_warning=diversity_warning,
+        active_families_count=active_families_count,
+        active_families=active_families,
     )
+
 
 
 def _record_provider_usage(db: Session, votes: List[IndividualVote]):

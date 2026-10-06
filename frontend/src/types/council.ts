@@ -5,6 +5,8 @@ export interface IndividualVote {
   display_name?: string | null;
   model_id: string;
   model_family: string;
+  model_used?: string | null;
+  is_fallback?: boolean;
   status: "success" | "failed" | "timeout" | "rate_limited" | "skipped" | "unavailable" | "missing_key" | "not_configured" | "invalid_key" | "model_not_found";
   verdict: "approve" | "reject" | "approve_with_conditions" | null;
   confidence: number | null;
@@ -28,6 +30,9 @@ export interface CouncilTally {
   total_votes_skipped: number;
   min_quorum_required?: number;
   has_quorum?: boolean;
+  diversity_warning?: string | null;
+  active_families_count?: number;
+  active_families?: string[];
 }
 
 export interface CouncilDecision {
@@ -70,9 +75,12 @@ export interface TestConnectionResponse {
   catalog_ok?: boolean | null;
   chat_status?: string | null;
   ttft_ms?: number | null;
+  median_ttft_ms?: number | null;
   retry_after_seconds?: number | null;
   is_free?: boolean | null;
   free_models?: string[];
+  available_models_label?: string | null;
+  alternative_models?: string[];
   privacy_hint?: string | null;
   model_found_in_list?: boolean | null;
   available_models_count: number;
@@ -84,6 +92,7 @@ export interface ProviderStatusItem {
   display_name: string;
   model_family: string;
   model_id: string;
+  fallback_model_id?: string | null;
   is_configured: boolean;
   is_local: boolean;
   daily_request_count: number;
@@ -94,4 +103,7 @@ export interface ProviderStatusItem {
   circuit_breaker_tripped?: boolean;
   circuit_breaker_reason?: string | null;
   circuit_breaker_resets_in_seconds?: number | null;
+  median_ttft_ms?: number | null;
+  enabled_in_council?: boolean;
 }
+

@@ -164,6 +164,62 @@ def reset_circuit_breaker(
         db.commit()
 
 
+def record_provider_ttft(
+    db: Session,
+    provider_name: str,
+    ttft_ms: int,
+) -> Optional[int]:
+    """
+    Records a TTFT sample for a provider (up to 15 rolling samples)
+    and computes and persists the median TTFT in milliseconds.
+    """
+    if ttft_ms is None or ttft_ms <= 0:
+        return None
+    p_name = provider_name.lower().strip()
+    now = datetime.now(timezone.utc)
+    cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
+    if not cb:
+        samples = [ttft_ms]
+        med = ttft_ms
+        cb = ProviderCircuitBreaker(
+            provider_name=p_name,
+            consecutive_failures=0,
+            is_tripped=False,
+            ttft_samples=samples,
+            median_ttft_ms=med,
+            updated_at=now,
+        )
+        db.add(cb)
+    else:
+        samples = list(cb.ttft_samples or [])
+        samples.append(ttft_ms)
+        if len(samples) > 15:
+            samples = samples[-15:]
+        sorted_samples = sorted(samples)
+        n = len(sorted_samples)
+        if n % 2 == 1:
+            med = sorted_samples[n // 2]
+        else:
+            med = int((sorted_samples[n // 2 - 1] + sorted_samples[n // 2]) / 2)
+        cb.ttft_samples = samples
+        cb.median_ttft_ms = med
+        cb.updated_at = now
+    db.commit()
+    return cb.median_ttft_ms
+
+
+def get_provider_median_ttft(
+    db: Session,
+    provider_name: str,
+) -> Optional[int]:
+    """Returns the persisted median TTFT in ms for a provider."""
+    p_name = provider_name.lower().strip()
+    cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
+    if cb and cb.median_ttft_ms is not None:
+        return cb.median_ttft_ms
+    return None
+
+
 def get_thinking_support_db(
     db: Session,
     provider_name: str,

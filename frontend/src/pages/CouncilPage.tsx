@@ -320,10 +320,12 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
     { text: "Should I invest GHS 3,000 lump sum into government treasury bills?", type: "investment", amount: "3000.00" },
   ];
 
-  // Calculate active distinct model families for diversity check
-  const readyProviders = providers.filter((p) => p.status === "ready" && p.is_configured);
-  const distinctFamilies = Array.from(new Set(readyProviders.map((p) => p.model_family)));
-  const fewerThanFiveFamilies = distinctFamilies.length < 5;
+  // Calculate active distinct model families for diversity check (enabled & healthy)
+  const workingProviders = providers.filter(
+    (p) => p.status === "ready" && p.is_configured && p.enabled_in_council !== false && !p.circuit_breaker_tripped
+  );
+  const distinctFamilies = Array.from(new Set(workingProviders.map((p) => p.model_family).filter(Boolean)));
+  const fewerThanFourFamilies = distinctFamilies.length < 4;
 
   return (
     <div className="flex flex-col gap-6" style={{ width: "100%", maxWidth: "100%" }}>
@@ -474,7 +476,7 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       )}
 
       {/* Model Family Diversity Warning Banner */}
-      {fewerThanFiveFamilies && (
+      {fewerThanFourFamilies && (
         <div
           className="glass-panel flex items-start gap-3"
           style={{
@@ -487,16 +489,16 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
           <AlertTriangle size={20} style={{ color: "var(--accent-warning)", flexShrink: 0, marginTop: "2px" }} />
           <div style={{ fontSize: "13px", lineHeight: "1.5" }}>
             <strong style={{ color: "var(--text-primary)" }}>
-              Model Family Diversity Warning ({distinctFamilies.length}/5 Families Active)
+              Model Family Diversity Notice ({distinctFamilies.length} Working {distinctFamilies.length === 1 ? "Family" : "Families"})
             </strong>
             <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)" }}>
-              Fewer than 5 distinct AI model families are active (currently active:{" "}
+              Fewer than 4 distinct AI model families are enabled and working (currently active:{" "}
               {distinctFamilies.length > 0 ? (
                 <strong>{distinctFamilies.join(", ")}</strong>
               ) : (
-                <em>None configured yet</em>
+                <em>None working yet</em>
               )}
-              ). For maximally balanced and robust deliberation, configure keys for <strong>Google (Gemini)</strong>, <strong>OpenAI open model (Groq)</strong>, <strong>Mistral</strong>, <strong>Qwen (OpenRouter)</strong>, and <strong>Zhipu GLM (NVIDIA NIM)</strong>.
+              ). At least 4 distinct model families are recommended for robust multi-perspective deliberation.
             </p>
           </div>
         </div>

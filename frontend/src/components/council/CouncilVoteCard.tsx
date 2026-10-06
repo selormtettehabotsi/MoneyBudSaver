@@ -152,9 +152,28 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
               <Cpu size={16} />
             </div>
             <div>
-              <h4 style={{ fontSize: "14px", fontWeight: 700 }}>{displayName}</h4>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h4 style={{ fontSize: "14px", fontWeight: 700 }}>{displayName}</h4>
+                {vote.is_fallback && vote.model_used && (
+                  <span
+                    className="badge badge-secondary"
+                    style={{
+                      fontSize: "10px",
+                      padding: "1px 6px",
+                      background: "rgba(234, 179, 8, 0.15)",
+                      color: "var(--warning)",
+                      borderColor: "rgba(234, 179, 8, 0.3)",
+                    }}
+                  >
+                    Fallback: {vote.model_used}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                 <span>{vote.model_family}</span>
+                {vote.model_used && !vote.is_fallback && (
+                  <span style={{ opacity: 0.7 }}>({vote.model_used})</span>
+                )}
                 {vote.latency_ms !== null && vote.latency_ms !== undefined && vote.latency_ms > 0 && (
                   <span className="flex items-center gap-0.5" style={{ color: "var(--text-secondary)" }}>
                     • <Timer size={11} /> {vote.latency_ms >= 1000 ? `${(vote.latency_ms / 1000).toFixed(1)}s` : `${vote.latency_ms}ms`}

@@ -92,6 +92,8 @@ class ProviderCircuitBreaker(Base):
     is_tripped = Column(Boolean, default=False, nullable=False)
     tripped_until = Column(DateTime(timezone=True), nullable=True)
     last_test_result = Column(JSON, nullable=True)
+    ttft_samples = Column(JSON, default=list, nullable=True)
+    median_ttft_ms = Column(Integer, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 

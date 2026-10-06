@@ -20,6 +20,8 @@ class IndividualVote(BaseModel):
     display_name: Optional[str] = None
     model_id: str
     model_family: str
+    model_used: Optional[str] = None
+    is_fallback: bool = False
     status: Literal["success", "failed", "timeout", "rate_limited", "skipped", "unavailable", "missing_key", "not_configured"]
     verdict: Optional[Literal["approve", "reject", "approve_with_conditions"]] = None
     confidence: Optional[int] = Field(None, ge=0, le=100)
@@ -43,6 +45,9 @@ class CouncilTally(BaseModel):
     total_votes_skipped: int
     min_quorum_required: int = 3
     has_quorum: bool = True
+    diversity_warning: Optional[str] = None
+    active_families_count: Optional[int] = None
+    active_families: List[str] = Field(default_factory=list)
 
 
 class GuardrailBreachInfo(BaseModel):
@@ -105,9 +110,12 @@ class TestConnectionResponse(BaseModel):
     catalog_ok: Optional[bool] = None
     chat_status: Optional[str] = None
     ttft_ms: Optional[int] = None
+    median_ttft_ms: Optional[int] = None
     retry_after_seconds: Optional[int] = None
     is_free: Optional[bool] = None
     free_models: List[str] = Field(default_factory=list)
+    available_models_label: Optional[str] = None
+    alternative_models: List[str] = Field(default_factory=list)
     privacy_hint: Optional[str] = None
     model_found_in_list: Optional[bool] = None
     available_models_count: int = 0
@@ -124,6 +132,7 @@ class ProviderStatusItem(BaseModel):
     display_name: str
     model_family: str
     model_id: str
+    fallback_model_id: Optional[str] = None
     is_configured: bool
     is_local: bool
     daily_request_count: int = 0
@@ -134,4 +143,6 @@ class ProviderStatusItem(BaseModel):
     circuit_breaker_tripped: bool = False
     circuit_breaker_reason: Optional[str] = None
     circuit_breaker_resets_in_seconds: Optional[int] = None
+    median_ttft_ms: Optional[int] = None
+    enabled_in_council: bool = True
 
