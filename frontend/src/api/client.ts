@@ -3,9 +3,9 @@
  * and Cold-Start Detection with Exponential Backoff Retries.
  */
 
-let onServerColdStartChange: ((isWarming: boolean, retryCount: number) => void) | null = null;
+let onServerColdStartChange: ((isWarming: boolean, retryCount: number, error?: string | null) => void) | null = null;
 
-export function registerServerStatusListener(listener: (isWarming: boolean, retryCount: number) => void) {
+export function registerServerStatusListener(listener: (isWarming: boolean, retryCount: number, error?: string | null) => void) {
   onServerColdStartChange = listener;
 }
 
@@ -49,7 +49,7 @@ export async function apiClient<T>(
 
       // Server is awake and responding
       if (onServerColdStartChange) {
-        onServerColdStartChange(false, 0);
+        onServerColdStartChange(false, 0, null);
       }
 
       if (response.status === 204) {
@@ -68,13 +68,13 @@ export async function apiClient<T>(
       attempt++;
       if (attempt <= maxRetries) {
         if (onServerColdStartChange) {
-          onServerColdStartChange(true, attempt);
+          onServerColdStartChange(true, attempt, null);
         }
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 6000);
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
         if (onServerColdStartChange) {
-          onServerColdStartChange(false, 0);
+          onServerColdStartChange(false, 0, err?.message || "Server connection failed");
         }
         throw err;
       }
@@ -83,3 +83,4 @@ export async function apiClient<T>(
 
   throw new Error("Unable to reach server after retries.");
 }
+

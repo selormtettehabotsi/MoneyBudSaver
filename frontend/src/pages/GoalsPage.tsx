@@ -163,7 +163,7 @@ export const GoalsPage: React.FC = () => {
       </div>
 
       {/* Summary Banner */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-panel" style={{ padding: "16px 20px" }}>
           <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Saved in Goals</span>
           <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--success)", marginTop: "4px" }}>
@@ -180,7 +180,7 @@ export const GoalsPage: React.FC = () => {
       </div>
 
       {/* Goals Grid */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {loading ? (
           <div style={{ gridColumn: "1 / -1", padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
             Loading savings goals...

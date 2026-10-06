@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
 import { usePinLock } from "../context/PinLockContext";
 import { useSync } from "../context/SyncContext";
+import { useServerStatus } from "../context/ServerStatusContext";
 import {
   Shield,
   Cpu,
@@ -51,12 +52,24 @@ export const SettingsPage: React.FC = () => {
   const { currency, setCurrency } = useCurrency();
   const { isPinSet, encryptOffline, autoLockMinutes, setupPin, removePin, lockNow } = usePinLock();
   const { isOnline } = useSync();
+  const {
+    isWarming,
+    retryCount,
+    serverStatus,
+    lastError,
+    lastChecked,
+    latencyMs,
+    isChecking,
+    checkBackendHealth,
+    dismissError,
+  } = useServerStatus();
 
   const [selectedCurrency, setSelectedCurrency] = useState(user?.currency || currency);
   const [maxDti, setMaxDti] = useState<number>(user?.settings?.max_dti_ratio || 40.0);
   const [minRunway, setMinRunway] = useState<number>(user?.settings?.min_runway_months || 3.0);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+
 
   // Council Connection Test & Provider Status State
   const [testResults, setTestResults] = useState<Record<string, TestConnectionResponse>>({});
@@ -284,12 +297,141 @@ export const SettingsPage: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-6" style={{ maxWidth: "860px" }}>
+    <div className="flex flex-col gap-6" style={{ maxWidth: "860px", width: "100%" }}>
       <div>
         <h1 style={{ fontSize: "26px" }}>Settings & Data Management</h1>
         <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-          Configure currency, financial guardrails, backup database, and manage CSV statements
+          Configure server health, currencies, financial guardrails, backups, and AI model providers
         </span>
+      </div>
+
+      {/* Backend & Server Connection Health Card */}
+      <div
+        className="glass-panel"
+        style={{
+          padding: "20px 24px",
+          border:
+            serverStatus === "error" || lastError
+              ? "1px solid var(--danger-border)"
+              : isWarming
+              ? "1px solid var(--warning-border)"
+              : "1px solid var(--border-color)",
+          background:
+            serverStatus === "error" || lastError
+              ? "rgba(244, 63, 94, 0.04)"
+              : isWarming
+              ? "rgba(245, 158, 11, 0.04)"
+              : "var(--bg-surface)",
+        }}
+      >
+        <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px", marginBottom: "12px" }}>
+          <div className="flex items-center gap-2.5">
+            <Server size={20} style={{ color: "var(--accent-primary)" }} />
+            <h3 style={{ fontSize: "17px" }}>MoneyCouncil Backend & Server Health</h3>
+          </div>
+
+          <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+            {isWarming ? (
+              <span className="badge badge-warning flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
+                <RefreshCw size={13} className="animate-spin" />
+                <span>Waking Up Backend... {retryCount > 0 ? `(Attempt ${retryCount}/3)` : ""}</span>
+              </span>
+            ) : serverStatus === "operational" && !lastError ? (
+              <span className="badge badge-success flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
+                <CheckCircle2 size={13} />
+                <span>Operational & Connected</span>
+              </span>
+            ) : (
+              <span className="badge badge-danger flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
+                <AlertCircle size={13} />
+                <span>Connection Issue Detected</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              disabled={isChecking}
+              onClick={checkBackendHealth}
+              className="btn btn-secondary btn-sm flex items-center gap-1.5"
+              style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
+              title="Ping backend server and measure latency"
+            >
+              <RefreshCw size={13} className={isChecking ? "animate-spin" : ""} />
+              <span>{isChecking ? "Pinging..." : "Check Health"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Diagnostic Details */}
+        <div className="flex items-center justify-between" style={{ fontSize: "12px", color: "var(--text-secondary)", flexWrap: "wrap", gap: "8px" }}>
+          <div>
+            <span>Backend Status: </span>
+            <strong style={{ color: "var(--text-primary)" }}>
+              {isWarming
+                ? `Warming up from idle (${retryCount > 0 ? `Attempt ${retryCount} of 3` : "Connecting..."})`
+                : serverStatus === "operational" && !lastError
+                ? "Active & Ready"
+                : "Server Unreachable"}
+            </strong>
+            {latencyMs !== null && serverStatus === "operational" && !lastError && (
+              <span style={{ marginLeft: "6px", color: "var(--accent-secondary)" }}>
+                • Latency: <strong>{latencyMs}ms</strong>
+              </span>
+            )}
+          </div>
+
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+            Last checked: {lastChecked ? lastChecked.toLocaleTimeString() : "Pending"}
+          </div>
+        </div>
+
+        {/* Server Alert Banner if Problem Occurs */}
+        {(lastError || serverStatus === "error") && (
+          <div
+            className="badge-danger flex items-start justify-between gap-3"
+            style={{
+              marginTop: "14px",
+              padding: "12px 16px",
+              borderRadius: "var(--radius-md)",
+              fontSize: "12px",
+              lineHeight: 1.5,
+              flexWrap: "wrap",
+            }}
+          >
+            <div className="flex items-start gap-2.5" style={{ flex: 1, minWidth: "220px" }}>
+              <AlertCircle size={18} className="text-rose-400" style={{ flexShrink: 0, marginTop: "2px" }} />
+              <div>
+                <strong style={{ fontSize: "13px" }}>Server Connection Alert:</strong>
+                <p style={{ margin: "3px 0 0 0" }}>
+                  {lastError || "The web app was unable to reach the MoneyCouncil backend server after multiple attempts."}
+                </p>
+                <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: "11px" }}>
+                  Troubleshooting: If your backend is hosted on Render or cloud hosting, it may take 30-50 seconds to complete cold-start boot. Check your internet connection or cloud dashboard.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2" style={{ alignSelf: "flex-end", marginTop: "4px" }}>
+              <button
+                type="button"
+                onClick={checkBackendHealth}
+                className="btn btn-secondary btn-sm"
+                style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
+              >
+                <RefreshCw size={12} className={isChecking ? "animate-spin" : ""} />
+                <span>Retry Connection</span>
+              </button>
+              <button
+                type="button"
+                onClick={dismissError}
+                className="btn btn-ghost btn-sm"
+                style={{ minHeight: "32px", padding: "4px 8px", fontSize: "11px", color: "var(--text-muted)" }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {savedSuccess && (
@@ -338,7 +480,7 @@ export const SettingsPage: React.FC = () => {
             If a proposed purchase exceeds your Max DTI or reduces your runway below the Minimum Runway threshold, the Council triggers a prominent red guardrail warning regardless of model votes.
           </p>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="input-group">
               <label className="input-label">Max Debt-to-Income Ratio (% DTI)</label>
               <input
@@ -372,6 +514,7 @@ export const SettingsPage: React.FC = () => {
         <button type="submit" disabled={loading} className="btn btn-primary" style={{ alignSelf: "flex-start", minHeight: "44px" }}>
           <span>{loading ? "Saving Settings..." : "Save Preferences"}</span>
         </button>
+
       </form>
 
       {/* 2.5. App Security, PIN Lock & Offline Data Encryption */}

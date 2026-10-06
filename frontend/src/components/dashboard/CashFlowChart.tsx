@@ -30,20 +30,20 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ trendData }) => {
   const groupSpacing = chartWidth / trendData.length;
 
   return (
-    <div className="glass-panel" style={{ padding: "20px 24px", position: "relative" }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: "20px" }}>
+    <div className="glass-panel" style={{ padding: "18px 20px", position: "relative" }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div>
           <h3 style={{ fontSize: "16px" }}>Monthly Cash Flow Trends</h3>
           <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Last 6 Months Income vs Expense</span>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4" style={{ fontSize: "12px", fontWeight: 600 }}>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3" style={{ fontSize: "12px", fontWeight: 600, flexWrap: "wrap" }}>
+          <div className="flex items-center gap-1.5">
             <span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "var(--success)" }} />
             <span style={{ color: "var(--text-secondary)" }}>Income</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "var(--danger)" }} />
             <span style={{ color: "var(--text-secondary)" }}>Expense</span>
           </div>

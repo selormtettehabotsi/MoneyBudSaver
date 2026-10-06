@@ -190,22 +190,22 @@ export const TransactionsPage: React.FC = () => {
       </div>
 
       {/* Summary Banner */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="glass-panel" style={{ padding: "14px 18px" }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="glass-panel" style={{ padding: "14px 16px" }}>
           <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Income</span>
           <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--success)", marginTop: "4px" }}>
             +{formatMoney(totalIncome)}
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: "14px 18px" }}>
+        <div className="glass-panel" style={{ padding: "14px 16px" }}>
           <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Expenses</span>
           <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--danger)", marginTop: "4px" }}>
             -{formatMoney(totalExpense)}
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: "14px 18px" }}>
+        <div className="glass-panel" style={{ padding: "14px 16px" }}>
           <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Net Balance</span>
           <div
             style={{
@@ -222,51 +222,54 @@ export const TransactionsPage: React.FC = () => {
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="glass-panel flex items-center gap-3" style={{ padding: "12px 16px", flexWrap: "wrap" }}>
+      <div className="glass-panel flex flex-col sm:flex-row items-stretch sm:items-center gap-3" style={{ padding: "12px 14px" }}>
         {/* Search */}
-        <div style={{ position: "relative", flex: "1 1 200px" }}>
+        <div style={{ position: "relative", flex: "1 1 180px", minWidth: 0 }}>
           <input
             type="text"
             className="input-field"
             placeholder="Search description..."
             value={filters.search || ""}
             onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-            style={{ paddingLeft: "36px", paddingRight: "12px" }}
+            style={{ paddingLeft: "36px", paddingRight: "12px", minHeight: "44px" }}
           />
-          <Search size={16} style={{ position: "absolute", left: "12px", top: "13px", color: "var(--text-muted)" }} />
+          <Search size={16} style={{ position: "absolute", left: "12px", top: "14px", color: "var(--text-muted)" }} />
         </div>
 
-        {/* Type Filter */}
-        <select
-          className="input-field"
-          style={{ width: "auto", minWidth: "130px" }}
-          value={filters.type || ""}
-          onChange={(e) =>
-            setFilters((prev) => ({ ...prev, type: (e.target.value as TransactionType) || undefined }))
-          }
-        >
-          <option value="">All Types</option>
-          <option value="income">Income</option>
-          <option value="expense">Expense</option>
-        </select>
+        <div className="flex items-center gap-2" style={{ flex: "1 1 auto", flexWrap: "wrap" }}>
+          {/* Type Filter */}
+          <select
+            className="input-field"
+            style={{ flex: "1 1 120px", minHeight: "44px" }}
+            value={filters.type || ""}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, type: (e.target.value as TransactionType) || undefined }))
+            }
+          >
+            <option value="">All Types</option>
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+          </select>
 
-        {/* Category Filter */}
-        <select
-          className="input-field"
-          style={{ width: "auto", minWidth: "160px" }}
-          value={filters.category_id || ""}
-          onChange={(e) =>
-            setFilters((prev) => ({ ...prev, category_id: e.target.value || undefined }))
-          }
-        >
-          <option value="">All Categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.type})
-            </option>
-          ))}
-        </select>
+          {/* Category Filter */}
+          <select
+            className="input-field"
+            style={{ flex: "1 1 140px", minHeight: "44px" }}
+            value={filters.category_id || ""}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, category_id: e.target.value || undefined }))
+            }
+          >
+            <option value="">All Categories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.type})
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
 
       {/* Transactions List */}
       <div className="glass-panel" style={{ padding: "16px 20px" }}>

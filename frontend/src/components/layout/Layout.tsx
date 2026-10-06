@@ -130,12 +130,18 @@ export const Layout: React.FC<LayoutProps> = ({ currentPage, onNavigate, childre
             display: flex !important;
           }
           .main-viewport {
-            padding: 0 16px calc(156px + env(safe-area-inset-bottom, 0px)) 16px !important;
+            padding: 0 12px calc(140px + env(safe-area-inset-bottom, 0px)) 12px !important;
             max-width: 100vw !important;
             overflow-x: hidden !important;
+          }
+        }
+        @media (max-width: 380px) {
+          .main-viewport {
+            padding: 0 8px calc(140px + env(safe-area-inset-bottom, 0px)) 8px !important;
           }
         }
       `}</style>
     </div>
   );
 };
+

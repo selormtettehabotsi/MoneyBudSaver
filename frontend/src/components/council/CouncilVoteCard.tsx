@@ -133,9 +133,9 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
         <div
           className="flex items-center justify-between"
           onClick={() => setExpanded(!expanded)}
-          style={{ cursor: "pointer", userSelect: "none" }}
+          style={{ cursor: "pointer", userSelect: "none", flexWrap: "wrap", gap: "8px" }}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" style={{ minWidth: 0, flex: "1 1 180px" }}>
             <div
               style={{
                 width: "32px",
@@ -151,9 +151,11 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
             >
               <Cpu size={16} />
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h4 style={{ fontSize: "14px", fontWeight: 700 }}>{displayName}</h4>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {displayName}
+                </h4>
                 {vote.is_fallback && vote.model_used && (
                   <span
                     className="badge badge-secondary"
@@ -169,7 +171,7 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+              <div className="flex items-center gap-2 flex-wrap" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                 <span>{vote.model_family}</span>
                 {vote.model_used && !vote.is_fallback && (
                   <span style={{ opacity: 0.7 }}>({vote.model_used})</span>
@@ -183,7 +185,8 @@ export const CouncilVoteCard: React.FC<CouncilVoteCardProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+
             {verdictBadge()}
             <button
               type="button"

@@ -230,10 +230,21 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
         @media (max-width: 640px) {
           .metrics-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 12px !important;
+            gap: 10px !important;
+          }
+        }
+        @media (max-width: 380px) {
+          .metrics-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 8px !important;
+          }
+          .metrics-grid .glass-panel {
+            padding: 12px 10px !important;
+            min-height: 125px !important;
           }
         }
       `}</style>
     </div>
   );
 };
+

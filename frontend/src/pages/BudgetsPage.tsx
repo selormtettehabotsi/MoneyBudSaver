@@ -193,7 +193,7 @@ export const BudgetsPage: React.FC = () => {
       </div>
 
       {/* Budgets Grid */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {loading ? (
           <div style={{ gridColumn: "1 / -1", padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
             Loading monthly budgets...

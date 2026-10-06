@@ -252,7 +252,7 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
 
       {/* Key Agreements and Dissent */}
       {!isNoQuorum && (
-        <div className="grid grid-cols-2 gap-4" style={{ marginBottom: "24px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ marginBottom: "20px" }}>
           {tally.key_agreements && tally.key_agreements.length > 0 && (
             <div style={{ background: "var(--bg-surface)", padding: "14px", borderRadius: "var(--radius-md)" }}>
               <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--success)" }}>KEY AGREEMENTS</span>
@@ -307,11 +307,12 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
           </p>
         )}
 
-        <div className="flex items-center gap-3" style={{ marginTop: "6px" }}>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5" style={{ marginTop: "6px" }}>
           <button
             className={`btn ${userVerdict === "accepted" ? "btn-success" : "btn-secondary"}`}
             style={{
               flex: 1,
+              minHeight: "44px",
               opacity: isNoQuorum ? 0.45 : 1,
               cursor: isNoQuorum ? "not-allowed" : "pointer",
             }}
@@ -325,7 +326,7 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
 
           <button
             className={`btn ${userVerdict === "rejected" ? "btn-danger" : "btn-secondary"}`}
-            style={{ flex: 1 }}
+            style={{ flex: 1, minHeight: "44px" }}
             onClick={() => onUserDecision("rejected")}
           >
             <ThumbsDown size={16} />
@@ -334,7 +335,7 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
 
           <button
             className={`btn ${userVerdict === "modified" ? "btn-primary" : "btn-secondary"}`}
-            style={{ flex: 1 }}
+            style={{ flex: 1, minHeight: "44px" }}
             onClick={() => onUserDecision("modified")}
           >
             <Edit3 size={16} />
@@ -342,6 +343,7 @@ export const CouncilTallyPanel: React.FC<CouncilTallyPanelProps> = ({
           </button>
         </div>
       </div>
+
     </div>
   );
 };
