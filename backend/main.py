@@ -43,9 +43,51 @@ app = FastAPI(
     redoc_url=None,
 )
 
+import uuid
+import traceback
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.core.security import redact_sensitive_info
+
+logger = logging.getLogger("app.errors")
+
 # Attach rate limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def global_unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Global safe exception handler:
+    - Passes through standard HTTP exceptions and validation errors
+    - Redacts sensitive keys, secrets, tokens, passwords from tracebacks
+    - Logs full redacted traceback with request_id server-side
+    - Returns generic JSON 500 with request_id to client (no internal info leakage)
+    """
+    if isinstance(exc, StarletteHTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=getattr(exc, "headers", None),
+        )
+    if isinstance(exc, RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+        )
+
+    request_id = str(uuid.uuid4())
+    tb_str = traceback.format_exc()
+    redacted_tb = redact_sensitive_info(tb_str)
+    logger.error(
+        f"Unhandled Internal Server Error [request_id={request_id}] on {request.method} {request.url.path}: {exc}\n{redacted_tb}"
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal error", "request_id": request_id},
+    )
 
 # 1. Strict Security Headers Middleware (CSP, frame-ancestors 'none', X-Frame-Options, etc.)
 app.add_middleware(SecurityHeadersMiddleware)

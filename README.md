@@ -9,7 +9,8 @@ Built with **FastAPI**, **SQLAlchemy**, and **React 18 + TypeScript + Vite**, Mo
 ## ✨ Key Features
 
 - **🏛️ Multi-AI Council Deliberation Engine**:
-  - Deliberates across 5 distinct free model families: Google Gemini (`gemini-3.8-flash`), Groq (`openai/gpt-oss-120b`), Mistral AI (`mistral-small-latest`), OpenRouter (`qwen/qwen3.8-27b:free`), and NVIDIA NIM (`z-ai/glm-5.3-flash`, plus optional `moonshotai/kimi-k3`), alongside optional paid/trial Cerebras and local Ollama.
+  - Deliberates across free-only model families: Google Gemini (`gemini-2.5-flash`), Groq (`openai/gpt-oss-120b`), OpenRouter (`nvidia/llama-3.1-nemotron-70b-instruct:free`), and NVIDIA NIM (`meta/muse-glimmer-30b`, `moonshotai/kimi-k3`), alongside custom OpenAI slots and local Ollama.
+  - In-app **AI Models Manager**: Manage model IDs, test probes, sampling parameters (temp, top_p, max_tokens), fallback models, and auto-switching directly from the GUI without editing environment variables in Render.
   - 2-Round deliberation protocol: Round 1 blind vote $\to$ Round 2 peer debate & revoting $\to$ Confidence-weighted tally ($[-1.0, +1.0]$).
   - Hard mathematical guardrail overrides for excessive Debt-to-Income (DTI) and emergency runway depletion.
 - **📊 Financial Health Score & Automated Review**:
@@ -44,15 +45,15 @@ graph TD
     
     subgraph Multi-AI Deliberation Council
         FastAPI --> PIIScrub["🛡️ PII Anonymizer"]
+        FastAPI --> ModelsMgr["🤖 AI Models Manager (DB Precedence)"]
         PIIScrub --> Round1["Round 1: Independent Blind Voting"]
         Round1 --> Round2["Round 2: Peer Debate & Re-voting"]
         Round2 --> Tally["Confidence-Weighted Tally & Guardrail Verification"]
         
-        Round1 -.-> Gemini["Google Gemini 2.5"]
-        Round1 -.-> Groq["Groq GPT-OSS 120B"]
-        Round1 -.-> Mistral["Mistral AI"]
-        Round1 -.-> OpenRouter["OpenRouter Qwen 2.5"]
-        Round1 -.-> Cerebras["Cerebras (Optional/Trial)"]
+        Round1 -.-> Gemini["Google Gemini"]
+        Round1 -.-> Groq["Groq GPT-OSS"]
+        Round1 -.-> OpenRouter["OpenRouter (Free Tier)"]
+        Round1 -.-> NVIDIA["NVIDIA NIM (Muse / Kimi)"]
         Round1 -.-> Ollama["Local Ollama"]
     end
 

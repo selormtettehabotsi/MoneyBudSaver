@@ -88,12 +88,12 @@ def _calculate_tally(votes: List[IndividualVote], min_quorum: Optional[int] = No
     active_families_count = len(working_families)
 
     diversity_warning: Optional[str] = None
-    if active_families_count < 4:
+    if active_families_count < 3:
         diversity_warning = (
             f"Low council diversity: Only {active_families_count} distinct model "
             f"{'family' if active_families_count == 1 else 'families'} "
             f"({', '.join(active_families) if active_families else 'none'}) participated. "
-            "At least 4 distinct families are recommended for robust multi-perspective deliberation."
+            "At least 3 distinct families are recommended for robust multi-perspective deliberation."
         )
 
     # 1. Quorum check
@@ -276,6 +276,7 @@ async def _run_deliberation_task(
         providers = get_configured_providers(
             user_settings=user_settings,
             local_only_mode=request.local_only_mode,
+            db=db,
         )
 
         if not providers:
@@ -432,9 +433,21 @@ async def _run_deliberation_task(
                 f"Review your peers' perspectives above. Provide your final Round 2 vote in strict JSON format."
             )
 
+            r2_providers = []
+            for p in providers:
+                is_slow_setting = getattr(p, "exclude_slow_round2", False) or user_settings.get(f"exclude_slow_round2_{p.name}", False) or user_settings.get("exclude_slow_round2", False)
+                if is_slow_setting:
+                    from app.services.council.health_manager import get_provider_median_ttft
+                    median_ttft = get_provider_median_ttft(db, p.name)
+                    if median_ttft and median_ttft > 30000:
+                        if job_id in _DELIBERATION_JOBS:
+                            _DELIBERATION_JOBS[job_id]["providers_progress"][p.name] = "Round 2 skipped (Slow provider > 30s)"
+                        continue
+                r2_providers.append(p)
+
             round2_tasks = [
                 query_with_progress(p, round2_prompt, SYSTEM_INSTRUCTION_ROUND2, 2)
-                for p in providers
+                for p in r2_providers
             ]
             round2_results: List[IndividualVote] = await asyncio.gather(*round2_tasks)
             round2_votes_map = {v.provider_name: v.model_dump(mode="json") for v in round2_results}
@@ -555,6 +568,7 @@ def create_deliberation_job(
     providers = get_configured_providers(
         user_settings=user_settings,
         local_only_mode=request.local_only_mode,
+        db=db,
     )
     initial_progress = {p.name: "Pending" for p in providers} if providers else {"system": "Not Configured"}
 
@@ -803,6 +817,7 @@ def create_retry_job(
     all_providers = get_configured_providers(
         user_settings=user_settings,
         local_only_mode=decision.local_only_mode,
+        db=db,
     )
     r1_votes_raw = decision.round1_votes or {}
 
@@ -904,7 +919,7 @@ async def _run_retry_task(
 
         failed_adapters: List[BaseProviderAdapter] = []
         for p in all_providers:
-            v_data = r1_votes_raw.get(p.name)
+            v_data = r1_votes_raw.get(p.name) or r1_votes_raw.get(p.name.split("_")[0])
             if not v_data or v_data.get("status") != "success" or not v_data.get("verdict"):
                 failed_adapters.append(p)
 
@@ -989,6 +1004,9 @@ async def _run_retry_task(
 
             merged_r1_map = dict(r1_votes_raw)
             for v in retry_results:
+                root_k = v.provider_name.split("_")[0]
+                if root_k in merged_r1_map and root_k != v.provider_name:
+                    merged_r1_map.pop(root_k, None)
                 merged_r1_map[v.provider_name] = v.model_dump(mode="json")
             decision.round1_votes = merged_r1_map
         else:

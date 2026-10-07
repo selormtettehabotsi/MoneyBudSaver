@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useSync } from "../context/SyncContext";
 import { CouncilVoteCard } from "../components/council/CouncilVoteCard";
 import { CouncilTallyPanel } from "../components/council/CouncilTallyPanel";
+import { AIModelsManager } from "../components/council/AIModelsManager";
 import { Modal } from "../components/common/Modal";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
 import {
@@ -27,6 +28,7 @@ import {
   Copy,
   ExternalLink,
   XOctagon,
+  Wrench,
 } from "lucide-react";
 
 interface CouncilPageProps {
@@ -58,6 +60,9 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
   // Providers Status
   const [providers, setProviders] = useState<ProviderStatusItem[]>([]);
   const [history, setHistory] = useState<CouncilDecision[]>([]);
+
+  // AI Models Manager Modal State
+  const [isAIModelsOpen, setIsAIModelsOpen] = useState(false);
 
   // Test All Providers State
   const [isTestAllOpen, setIsTestAllOpen] = useState(false);
@@ -320,12 +325,17 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
     { text: "Should I invest GHS 3,000 lump sum into government treasury bills?", type: "investment", amount: "3000.00" },
   ];
 
-  // Calculate active distinct model families for diversity check (enabled & healthy)
+  // Calculate active distinct model families for diversity check (enabled & passed last test)
   const workingProviders = providers.filter(
-    (p) => p.status === "ready" && p.is_configured && p.enabled_in_council !== false && !p.circuit_breaker_tripped
+    (p) => (p.status === "ready" || p.status === "working") && p.is_configured && p.enabled_in_council !== false && !p.circuit_breaker_tripped
   );
   const distinctFamilies = Array.from(new Set(workingProviders.map((p) => p.model_family).filter(Boolean)));
   const fewerThanFourFamilies = distinctFamilies.length < 4;
+
+  // Broken or empty voters that need fixing
+  const brokenVoters = providers.filter(
+    (p) => p.is_configured && p.enabled_in_council !== false && (!p.model_id || p.status === "missing_model_id" || p.status === "failed")
+  );
 
   return (
     <div className="flex flex-col gap-6" style={{ width: "100%", maxWidth: "100%" }}>
@@ -340,6 +350,17 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
 
         {/* Action & Active Providers Badges */}
         <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => setIsAIModelsOpen(true)}
+            className="btn btn-primary btn-sm flex items-center gap-1.5"
+            style={{ minHeight: "34px", padding: "5px 12px", fontSize: "12px" }}
+            title="Manage Council AI Models, Sampling & Fallbacks"
+          >
+            <Cpu size={14} />
+            <span>AI Models</span>
+          </button>
+
           <button
             type="button"
             disabled={!isOnline || testAllLoading}
@@ -440,6 +461,40 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
       </div>
 
       <DisclaimerBanner />
+
+      {/* Broken or Missing Model Voters Banner */}
+      {brokenVoters.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {brokenVoters.map((p) => (
+            <div
+              key={p.name}
+              className="glass-panel flex items-center justify-between gap-3"
+              style={{
+                padding: "12px 18px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid rgba(239, 68, 68, 0.4)",
+                background: "rgba(239, 68, 68, 0.08)",
+              }}
+            >
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle size={18} className="text-rose-400" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                  Model {p.model_id ? `"${p.model_id}"` : "ID"} for {p.display_name} needs fixing
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAIModelsOpen(true)}
+                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                style={{ minHeight: "36px", padding: "6px 14px", fontSize: "12px", whiteSpace: "nowrap" }}
+              >
+                <Wrench size={13} />
+                <span>Fix in AI Models</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Active Conflict Banner with One-Click Cancel */}
       {activeConflictJobId && (
@@ -1188,6 +1243,21 @@ export const CouncilPage: React.FC<CouncilPageProps> = ({ initialQuestion }) => 
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* AI Models Manager Modal */}
+      <Modal
+        isOpen={isAIModelsOpen}
+        onClose={() => {
+          setIsAIModelsOpen(false);
+          loadProvidersAndHistory();
+        }}
+        title="AI Models Manager (Free-Only Council)"
+        maxWidth="920px"
+      >
+        <div style={{ maxHeight: "calc(85vh - 120px)", overflowY: "auto", paddingRight: "4px" }}>
+          <AIModelsManager />
+        </div>
       </Modal>
     </div>
   );

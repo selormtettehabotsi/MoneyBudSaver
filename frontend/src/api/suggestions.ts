@@ -11,9 +11,11 @@ export interface SuggestionItem {
 export interface PillarScore {
   score: number;
   max: number;
-  value_pct?: number;
-  runway_months?: number;
-  dti_pct?: number;
+  value_pct?: number | null;
+  runway_months?: number | null;
+  display?: string | null;
+  has_sufficient_data?: boolean;
+  dti_pct?: number | null;
   exceeded?: number;
   total?: number;
 }
@@ -24,7 +26,10 @@ export interface MetricsSummary {
   net_cashflow: number;
   liquid_savings: number;
   dti_ratio: number;
-  runway_months: number;
+  runway_months?: number | null;
+  runway_display?: string;
+  has_sufficient_data?: boolean;
+  data_notice?: string | null;
   health_score: number;
   pillars: {
     savings_rate: PillarScore;

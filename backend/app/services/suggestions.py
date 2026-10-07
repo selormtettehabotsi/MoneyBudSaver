@@ -33,6 +33,7 @@ def compute_financial_health_score(
     liquid_savings: Decimal,
     budgets_exceeded: int,
     total_budgets: int,
+    has_sufficient_data: bool = True,
 ) -> Dict[str, Any]:
     """
     Computes a deterministic 0-100 Financial Health Score across 4 pillars (25 pts each):
@@ -61,17 +62,22 @@ def compute_financial_health_score(
         savings_rate_score = 5 if monthly_expenses == 0 else 0
 
     # Pillar 2: Emergency Runway (Liquid Savings / Monthly Expenses)
-    runway_months = float(calculate_runway_months(liquid_savings, monthly_expenses))
-    if runway_months >= 6.0:
-        runway_score = 25
-    elif runway_months >= 3.0:
-        runway_score = 20
-    elif runway_months >= 1.5:
-        runway_score = 12
-    elif runway_months >= 0.5:
-        runway_score = 5
+    if has_sufficient_data:
+        runway_months: Optional[float] = float(calculate_runway_months(liquid_savings, monthly_expenses))
+        if runway_months >= 6.0:
+            runway_score = 25
+        elif runway_months >= 3.0:
+            runway_score = 20
+        elif runway_months >= 1.5:
+            runway_score = 12
+        elif runway_months >= 0.5:
+            runway_score = 5
+        else:
+            runway_score = 0
     else:
-        runway_score = 0
+        runway_months = None
+        # Neutral baseline when history is accumulating
+        runway_score = 12
 
     # Pillar 3: Debt Burden / DTI
     dti_ratio = float(calculate_dti_ratio(monthly_debt_service, monthly_income))
@@ -107,7 +113,13 @@ def compute_financial_health_score(
         "total_score": total_score,
         "pillars": {
             "savings_rate": {"score": savings_rate_score, "max": 25, "value_pct": savings_rate_pct},
-            "runway": {"score": runway_score, "max": 25, "runway_months": runway_months},
+            "runway": {
+                "score": runway_score,
+                "max": 25,
+                "runway_months": runway_months,
+                "has_sufficient_data": has_sufficient_data,
+                "display": f"{runway_months:.1f} mos" if runway_months is not None else "Not enough data",
+            },
             "debt_burden": {"score": debt_score, "max": 25, "dti_pct": dti_ratio},
             "budget_adherence": {
                 "score": budget_score,
@@ -355,6 +367,7 @@ def generate_audit_suggestions(
         liquid_savings=liquid_savings,
         budgets_exceeded=budgets_exceeded_count,
         total_budgets=total_budgets_count,
+        has_sufficient_data=has_sufficient,
     )
 
     metrics_summary = {
@@ -363,8 +376,10 @@ def generate_audit_suggestions(
         "net_cashflow": float(net_cashflow),
         "liquid_savings": float(liquid_savings),
         "dti_ratio": float(dti_ratio),
-        "runway_months": float(runway_months) if runway_months is not None else 0.0,
-        "runway_display": snapshot.get("current_runway_display", "0.0 months"),
+        "runway_months": float(runway_months) if runway_months is not None else None,
+        "runway_display": snapshot.get("current_runway_display", "Not enough data"),
+        "has_sufficient_data": has_sufficient,
+        "data_notice": snapshot.get("data_notice"),
         "health_score": health_metrics["total_score"],
         "pillars": health_metrics["pillars"],
         "budgets_tracked": total_budgets_count,

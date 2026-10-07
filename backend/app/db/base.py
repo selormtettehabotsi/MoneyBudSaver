@@ -13,6 +13,11 @@ from app.models import (
     ProviderQuota,
     CouncilCache,
     CouncilJob,
+    ProviderSetting,
+    RecommendedModel,
+    FreeTierAllowlist,
+    ModelSwitchLog,
+    CouncilAppSetting,
     SuggestionLog,
 )
 

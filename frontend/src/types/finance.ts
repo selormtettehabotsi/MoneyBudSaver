@@ -108,8 +108,33 @@ export interface DashboardData {
   total_liquid_savings: string;
   total_debt_balance: string;
   debt_to_income_ratio: number;
-  runway_months: number;
+  runway_months: number | null;
+  has_sufficient_data: boolean;
+  runway_display: string;
+  data_notice: string | null;
   category_breakdown: CategoryExpenseBreakdown[];
   monthly_trend: MonthlyTrendPoint[];
   guardrail_warnings: string[];
+}
+
+export interface RunwayData {
+  currency: string;
+  total_liquid_savings: string;
+  avg_monthly_expense_90d: string;
+  runway_months: number | null;
+  has_sufficient_data: boolean;
+  runway_display: string;
+  data_notice: string | null;
+  min_runway_threshold: number;
+  guardrail_warnings: string[];
+}
+
+export interface CashflowData {
+  currency: string;
+  total_income_current_month: string;
+  total_expense_current_month: string;
+  net_cashflow_current_month: string;
+  savings_rate_percentage: number;
+  category_breakdown: CategoryExpenseBreakdown[];
+  monthly_trend: MonthlyTrendPoint[];
 }

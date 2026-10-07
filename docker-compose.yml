@@ -15,9 +15,8 @@ services:
       - DATABASE_URL=sqlite:////app/data/moneycouncil.db
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     volumes:
       - moneycouncil_data:/app/data

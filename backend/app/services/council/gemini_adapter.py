@@ -39,12 +39,15 @@ class GeminiAdapter(BaseProviderAdapter):
         name: str = "gemini",
         display_name: str = "Google Gemini",
         model_family: str = "Google Gemini Family",
-        model_id: str = "gemini-3.8-flash",
+        model_id: str = "gemini-2.5-flash",
         fallback_model_id: Optional[str] = None,
         api_key: Optional[str] = None,
         thinking_level: Optional[str] = "low",
         timeout_seconds: int = 25,
+        temperature: float = 0.5,
+        top_p: float = 0.95,
         max_output_tokens: int = 4096,
+        exclude_slow_round2: bool = False,
         min_request_interval_seconds: Optional[float] = None,
     ):
         super().__init__(
@@ -54,6 +57,10 @@ class GeminiAdapter(BaseProviderAdapter):
             model_id=model_id,
             fallback_model_id=fallback_model_id,
             timeout_seconds=timeout_seconds,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_output_tokens,
+            exclude_slow_round2=exclude_slow_round2,
             min_request_interval_seconds=min_request_interval_seconds,
         )
         self.api_key = api_key
@@ -81,7 +88,8 @@ class GeminiAdapter(BaseProviderAdapter):
         }
 
         generation_config: Dict[str, Any] = {
-            "temperature": 0.2,
+            "temperature": self.temperature,
+            "topP": self.top_p,
             "response_mime_type": "application/json",
             "maxOutputTokens": self.max_output_tokens,
         }
@@ -150,6 +158,19 @@ class GeminiAdapter(BaseProviderAdapter):
         if res.status_code == 429:
             retry_after_str = res.headers.get("Retry-After")
             retry_secs = parse_retry_after(retry_after_str)
+            err_text = res.text.lower()
+            if any(q in err_text for q in ("insufficient", "quota", "credit", "balance", "billable")):
+                return IndividualVote(
+                    provider_name=self.name,
+                    display_name=self.display_name,
+                    model_id=self.model_id,
+                    model_family=self.model_family,
+                    model_used=model_name_used,
+                    is_fallback=is_fallback_model,
+                    status="rate_limited",
+                    round_number=round_number,
+                    error_message="not free, disabled: Gemini quota exhausted or billing required.",
+                )
             return IndividualVote(
                 provider_name=self.name,
                 display_name=self.display_name,
@@ -184,7 +205,7 @@ class GeminiAdapter(BaseProviderAdapter):
                 model_family=self.model_family,
                 model_used=model_name_used,
                 is_fallback=is_fallback_model,
-                status="failed",
+                status="invalid_key",
                 round_number=round_number,
                 error_message=f"Invalid API Key: Provider rejected authentication (HTTP {res.status_code}).",
             )
@@ -199,7 +220,7 @@ class GeminiAdapter(BaseProviderAdapter):
                 is_fallback=is_fallback_model,
                 status="unavailable",
                 round_number=round_number,
-                error_message="Gemini billing/quota exhausted (HTTP 402). Model unavailable.",
+                error_message="not free, disabled: Gemini billing/quota exhausted (HTTP 402).",
             )
 
         if res.status_code == 404:
@@ -210,9 +231,9 @@ class GeminiAdapter(BaseProviderAdapter):
                 model_family=self.model_family,
                 model_used=model_name_used,
                 is_fallback=is_fallback_model,
-                status="unavailable",
+                status="model_not_found",
                 round_number=round_number,
-                error_message=f"Gemini model '{model_name_used}' not found (HTTP 404). Model unavailable.",
+                error_message=f"Model ID '{model_name_used}' no longer exists for provider '{self.name}', fix in Settings (HTTP 404).",
             )
 
         if res.status_code != 200:
@@ -262,6 +283,20 @@ class GeminiAdapter(BaseProviderAdapter):
         parts = candidate.get("content", {}).get("parts", [])
         raw_text = parts[0].get("text", "") if parts else ""
 
+        # If output empty, retry once with temperature=1.0
+        if not raw_text or not raw_text.strip():
+            retry_gen_cfg = dict(generation_config)
+            retry_gen_cfg["temperature"] = 1.0
+            retry_payload = dict(payload)
+            retry_payload["generationConfig"] = retry_gen_cfg
+            retry_res = await client.post(endpoint, headers=headers, json=retry_payload)
+            if retry_res.status_code == 200:
+                retry_data = retry_res.json()
+                cands = retry_data.get("candidates", [])
+                if cands:
+                    p_parts = cands[0].get("content", {}).get("parts", [])
+                    raw_text = p_parts[0].get("text", "") if p_parts else ""
+
         parsed = extract_and_repair_json(raw_text)
         is_valid, norm, err = validate_and_normalize_vote(parsed)
 
@@ -275,7 +310,7 @@ class GeminiAdapter(BaseProviderAdapter):
                 is_fallback=is_fallback_model,
                 status="unavailable",
                 round_number=round_number,
-                error_message=f"Invalid response: failed to parse JSON vote from model ({err}).",
+                error_message=f"Invalid response: failed to parse JSON vote from Gemini ({err}).",
             )
 
         return IndividualVote(
@@ -326,7 +361,7 @@ class GeminiAdapter(BaseProviderAdapter):
                 status="not_configured",
                 round_number=round_number,
                 latency_ms=0,
-                error_message="GEMINI_API_KEY not configured in environment.",
+                error_message="API Key not configured in environment.",
             )
 
         await wait_for_provider_pacing(self.name, self.min_request_interval_seconds)
@@ -334,7 +369,7 @@ class GeminiAdapter(BaseProviderAdapter):
         last_vote: Optional[IndividualVote] = None
 
         try:
-            async with httpx.AsyncClient(timeout=eff_timeout) as client:
+            async with httpx.AsyncClient(timeout=eff_timeout, follow_redirects=False) as client:
                 for attempt in range(3):
                     try:
                         vote = await self._execute_single_attempt(
@@ -349,6 +384,7 @@ class GeminiAdapter(BaseProviderAdapter):
 
                         if vote.status == "success":
                             vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
+                            vote.display_name = self.display_name
                             return vote
 
                         is_transient = (
@@ -382,7 +418,7 @@ class GeminiAdapter(BaseProviderAdapter):
                             is_fallback=False,
                             status="timeout",
                             round_number=round_number,
-                            error_message=f"Request timed out after {eff_timeout}s.",
+                            error_message=f"Gemini request timed out after {eff_timeout}s.",
                         )
                         if attempt < 2:
                             delay = (0.75 * (2 ** attempt)) + 0.5 + random.uniform(0.05, 0.3)
@@ -390,7 +426,7 @@ class GeminiAdapter(BaseProviderAdapter):
                             continue
                         break
 
-                # Fallback model attempt if primary failed
+                # If primary model failed and fallback_model_id is configured, attempt fallback
                 if (
                     last_vote
                     and last_vote.status != "success"
@@ -409,15 +445,12 @@ class GeminiAdapter(BaseProviderAdapter):
                         )
                         if fb_vote.status == "success":
                             fb_vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
+                            fb_vote.display_name = self.display_name
                             return fb_vote
                     except Exception:
                         pass
 
-                if last_vote:
-                    last_vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
-                    return last_vote
-
-                return IndividualVote(
+                ret_vote = last_vote or IndividualVote(
                     provider_name=self.name,
                     display_name=self.display_name,
                     model_id=self.model_id,
@@ -426,13 +459,14 @@ class GeminiAdapter(BaseProviderAdapter):
                     is_fallback=False,
                     status="failed",
                     round_number=round_number,
-                    latency_ms=int((time.perf_counter() - start_time) * 1000),
-                    error_message="All retry attempts failed.",
+                    error_message="All Gemini retry attempts failed.",
                 )
+                ret_vote.latency_ms = int((time.perf_counter() - start_time) * 1000)
+                ret_vote.display_name = self.display_name
+                return ret_vote
 
         except Exception as e:
-            latency_ms = int((time.perf_counter() - start_time) * 1000)
-            clean_err = redact_sensitive_info(str(e))
+            clean_exc = redact_sensitive_info(str(e))
             return IndividualVote(
                 provider_name=self.name,
                 display_name=self.display_name,
@@ -442,7 +476,6 @@ class GeminiAdapter(BaseProviderAdapter):
                 is_fallback=False,
                 status="failed",
                 round_number=round_number,
-                latency_ms=latency_ms,
-                error_message=clean_err,
+                latency_ms=int((time.perf_counter() - start_time) * 1000),
+                error_message=clean_exc,
             )
-

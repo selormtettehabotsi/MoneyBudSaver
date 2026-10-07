@@ -1,0 +1,29 @@
+{
+  "gemini": [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b"
+  ],
+  "groq": [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen-qwq-32b",
+    "qwen/qwen-2.5-72b-instruct",
+    "qwen/qwen-2.5-32b",
+    "gemma2-9b-it",
+    "deepseek-r1-distill-llama-70b"
+  ],
+  "nvidia": [
+    "meta/muse-glimmer-30b",
+    "moonshotai/kimi-k3",
+    "z-ai/glm-5.3",
+    "z-ai/glm-5.3-flash",
+    "meta/llama-3.3-70b-instruct",
+    "nvidia/llama-3.1-nemotron-70b-instruct",
+    "deepseek-ai/deepseek-r1"
+  ]
+}

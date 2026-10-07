@@ -103,10 +103,14 @@ async def register(payload: UserRegister, response: Response, db: Session = Depe
             "min_runway_months": settings.DEFAULT_MIN_RUNWAY_MONTHS,
             "providers_enabled": {
                 "gemini": bool(settings.GEMINI_API_KEY),
-                "groq": bool(settings.GROQ_API_KEY),
-                "cerebras": False,  # Off by default (optional / paid or trial only)
-                "mistral": bool(settings.MISTRAL_API_KEY),
-                "openrouter": bool(settings.OPENROUTER_API_KEY),
+                "groq_1": bool(settings.GROQ_API_KEY),
+                "groq_2": bool(settings.GROQ_API_KEY),
+                "openrouter_1": bool(settings.OPENROUTER_API_KEY),
+                "openrouter_2": bool(settings.OPENROUTER_API_KEY),
+                "nvidia_1": bool(settings.NVIDIA_API_KEY),
+                "nvidia_2": bool(settings.NVIDIA_API_KEY),
+                "custom_1": False,
+                "custom_2": False,
                 "ollama": not settings.is_hosted,
             },
         },

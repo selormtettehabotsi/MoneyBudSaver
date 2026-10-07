@@ -112,3 +112,73 @@ class ProviderParamFallback(Base):
         UniqueConstraint("provider_name", "model_id", name="uq_provider_model_param_fallback"),
     )
 
+
+class ProviderSetting(Base):
+    __tablename__ = "provider_settings"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_key = Column(String(50), unique=True, index=True, nullable=False)
+    model_id = Column(String(150), nullable=True)
+    fallback_model_id = Column(String(150), nullable=True)
+    family_override = Column(String(50), nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    timeout = Column(Integer, default=25, nullable=False)
+    temperature = Column(Numeric(4, 2), default=0.5, nullable=False)
+    top_p = Column(Numeric(4, 2), default=0.95, nullable=False)
+    max_tokens = Column(Integer, default=4096, nullable=False)
+    confirmed_free = Column(Boolean, default=False, nullable=False)
+    history = Column(JSON, default=list, nullable=False)  # List of previous model IDs (up to 5)
+    display_name = Column(String(100), nullable=True)
+    base_url = Column(String(255), nullable=True)
+    env_key_name = Column(String(100), nullable=True)  # NAME of env var only, never the key itself
+    exclude_slow_round2 = Column(Boolean, default=False, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class RecommendedModel(Base):
+    __tablename__ = "recommended_models"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_name = Column(String(50), index=True, nullable=False)
+    model_id = Column(String(150), nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider_name", "model_id", name="uq_recommended_provider_model"),
+    )
+
+
+class FreeTierAllowlist(Base):
+    __tablename__ = "free_tier_models"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_name = Column(String(50), index=True, nullable=False)
+    model_id = Column(String(150), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider_name", "model_id", name="uq_free_tier_provider_model"),
+    )
+
+
+class ModelSwitchLog(Base):
+    __tablename__ = "model_switch_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_key = Column(String(50), index=True, nullable=False)
+    old_model_id = Column(String(150), nullable=False)
+    new_model_id = Column(String(150), nullable=False)
+    reason = Column(Text, nullable=False)
+    reverted = Column(Boolean, default=False, nullable=False)
+    switched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class CouncilAppSetting(Base):
+    __tablename__ = "council_app_settings"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    setting_key = Column(String(50), unique=True, index=True, nullable=False)
+    setting_value = Column(JSON, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+

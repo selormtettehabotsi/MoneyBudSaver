@@ -22,7 +22,7 @@ class IndividualVote(BaseModel):
     model_family: str
     model_used: Optional[str] = None
     is_fallback: bool = False
-    status: Literal["success", "failed", "timeout", "rate_limited", "skipped", "unavailable", "missing_key", "not_configured"]
+    status: Literal["success", "failed", "timeout", "rate_limited", "skipped", "unavailable", "missing_key", "not_configured", "invalid_key", "model_not_found", "bad_json"]
     verdict: Optional[Literal["approve", "reject", "approve_with_conditions"]] = None
     confidence: Optional[int] = Field(None, ge=0, le=100)
     reasoning: Optional[str] = None
@@ -54,11 +54,14 @@ class GuardrailBreachInfo(BaseModel):
     breached: bool
     violations: List[str]
     pre_decision_dti: float
-    post_decision_dti: Optional[float]
-    current_runway_months: float
-    post_decision_runway_months: Optional[float]
+    post_decision_dti: Optional[float] = None
+    current_runway_months: Optional[float] = None
+    post_decision_runway_months: Optional[float] = None
     max_dti_threshold: float
     min_runway_threshold: float
+    has_sufficient_data: bool = True
+    runway_display: str = "Not enough data"
+    data_notice: Optional[str] = None
 
 
 class CouncilDecisionOut(BaseModel):
@@ -135,14 +138,154 @@ class ProviderStatusItem(BaseModel):
     fallback_model_id: Optional[str] = None
     is_configured: bool
     is_local: bool
+    has_key: bool = True
     daily_request_count: int = 0
     daily_quota_limit: Optional[int] = None
     is_near_limit: bool = False
     shares_key_with: Optional[str] = None
-    status: Literal["ready", "missing_key", "missing_model_id", "disabled_in_hosted", "rate_limited", "circuit_breaker_tripped"]
+    status: Literal["ready", "missing_key", "missing_model_id", "disabled_in_hosted", "rate_limited", "circuit_breaker_tripped", "working", "failed", "untested", "slow", "skipped"]
     circuit_breaker_tripped: bool = False
     circuit_breaker_reason: Optional[str] = None
     circuit_breaker_resets_in_seconds: Optional[int] = None
     median_ttft_ms: Optional[int] = None
+    is_slow: bool = False
     enabled_in_council: bool = True
+    confirmed_free: bool = False
+    history: List[str] = Field(default_factory=list)
+    base_url: Optional[str] = None
+    env_key_name: Optional[str] = None
+    exclude_slow_round2: bool = False
+    temperature: float = 0.5
+    top_p: float = 0.95
+    max_tokens: int = 4096
+
+
+class UpdateProviderModelRequest(BaseModel):
+    model_id: str = Field(..., description="Target model ID to validate, test, and activate")
+    fallback_model_id: Optional[str] = None
+    family_override: Optional[str] = None
+    enabled: Optional[bool] = None
+    timeout: Optional[int] = None
+    confirmed_free: Optional[bool] = False
+    display_name: Optional[str] = None
+    base_url: Optional[str] = None
+    env_key_name: Optional[str] = None
+    exclude_slow_round2: Optional[bool] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_tokens: Optional[int] = None
+    force_skip_test: bool = False
+
+
+class ProviderSettingOut(BaseModel):
+    provider_key: str
+    model_id: Optional[str] = None
+    fallback_model_id: Optional[str] = None
+    family_override: Optional[str] = None
+    enabled: bool = True
+    timeout: int = 25
+    temperature: float = 0.5
+    top_p: float = 0.95
+    max_tokens: int = 4096
+    confirmed_free: bool = False
+    history: List[str] = Field(default_factory=list)
+    display_name: Optional[str] = None
+    base_url: Optional[str] = None
+    env_key_name: Optional[str] = None
+    exclude_slow_round2: bool = False
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProviderModelHistoryRevertRequest(BaseModel):
+    model_id: str
+
+
+class RecommendedModelItem(BaseModel):
+    provider_name: str
+    model_id: str
+    pattern: Optional[str] = None
+    resolved_model_id: Optional[str] = None
+    status: Optional[str] = "matched"  # 'matched' or 'no match in catalog'
+    sort_order: int = 0
+    last_test_badge: Optional[Literal["passed", "failed", "untested"]] = "untested"
+    median_ttft_ms: Optional[int] = None
+    in_live_catalog: bool = True
+    is_free: bool = True
+
+
+
+class UpdateRecommendedListRequest(BaseModel):
+    models: List[str]
+
+
+class FindWorkingModelCandidateResult(BaseModel):
+    model_id: str
+    provider_name: str
+    model_family: str
+    is_recommended: bool = False
+    is_free: bool = True
+    status: Literal["passed", "failed", "timeout", "rate_limited", "untested"]
+    http_status: Optional[int] = None
+    latency_ms: int = 0
+    ttft_ms: Optional[int] = None
+    diagnosis: str = ""
+
+
+class FindWorkingModelsResponse(BaseModel):
+    provider_name: str
+    tested_candidates: List[FindWorkingModelCandidateResult] = Field(default_factory=list)
+    message: str
+
+
+class UseRecommendedResponse(BaseModel):
+    provider_name: str
+    applied_model_id: Optional[str] = None
+    attempts: List[FindWorkingModelCandidateResult] = Field(default_factory=list)
+    success: bool
+    message: str
+
+
+class FixAllProviderResult(BaseModel):
+    provider_key: str
+    action: Literal["fixed", "already_working", "failed"]
+    model_id: Optional[str] = None
+    old_model_id: Optional[str] = None
+    new_model_id: Optional[str] = None
+    message: str
+    attempts: List[FindWorkingModelCandidateResult] = Field(default_factory=list)
+
+
+class FixAllResponse(BaseModel):
+    summary: str
+    fixed_count: int
+    working_count: int
+    failed_count: int
+    details: List[FixAllProviderResult] = Field(default_factory=list)
+
+
+class ModelSwitchLogOut(BaseModel):
+    id: str
+    provider_key: str
+    old_model_id: str
+    new_model_id: str
+    reason: str
+    reverted: bool
+    switched_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AutoSwitchSettingUpdate(BaseModel):
+    enabled: bool
+
+
+class CouncilAppSettingOut(BaseModel):
+    setting_key: str
+    setting_value: Any
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
 

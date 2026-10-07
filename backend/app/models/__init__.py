@@ -4,7 +4,17 @@ from app.models.transaction import Transaction
 from app.models.budget import Budget
 from app.models.savings_goal import SavingsGoal
 from app.models.debt import Debt
-from app.models.council import CouncilDecision, ProviderQuota, CouncilCache, CouncilJob
+from app.models.council import (
+    CouncilDecision,
+    ProviderQuota,
+    CouncilCache,
+    CouncilJob,
+    ProviderSetting,
+    RecommendedModel,
+    FreeTierAllowlist,
+    ModelSwitchLog,
+    CouncilAppSetting,
+)
 from app.models.suggestion import SuggestionLog
 
 __all__ = [
@@ -18,5 +28,10 @@ __all__ = [
     "ProviderQuota",
     "CouncilCache",
     "CouncilJob",
+    "ProviderSetting",
+    "RecommendedModel",
+    "FreeTierAllowlist",
+    "ModelSwitchLog",
+    "CouncilAppSetting",
     "SuggestionLog",
 ]

@@ -11,6 +11,20 @@ from app.models.council import ProviderCircuitBreaker, ProviderParamFallback
 from app.services.council.base_adapter import _UNSUPPORTED_THINKING_PROVIDERS
 
 
+def normalize_provider_slot_key(provider_name: str) -> str:
+    """Normalizes legacy or alias names to canonical provider slot keys."""
+    p = provider_name.lower().strip()
+    if p in ("groq", "groq_primary"):
+        return "groq_1"
+    if p in ("openrouter", "openrouter_primary"):
+        return "openrouter_1"
+    if p in ("nvidia", "nvidia_glm", "nvidia_primary"):
+        return "nvidia_1"
+    if p in ("nvidia_kimi", "kimi", "moonshot"):
+        return "nvidia_2"
+    return p
+
+
 def is_circuit_breaker_active(
     db: Session,
     provider_name: str,
@@ -20,7 +34,7 @@ def is_circuit_breaker_active(
     Returns: (is_active, last_failure_reason, seconds_remaining)
     Auto-resets if the 10-minute cooldown period has expired.
     """
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if not cb or not cb.is_tripped:
         return False, None, None
@@ -54,7 +68,7 @@ def record_provider_test_result(
     Persists the last test connection result without affecting the circuit breaker
     consecutive failure counter (test button calls must not trip the breaker).
     """
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     now = datetime.now(timezone.utc)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if not cb:
@@ -78,7 +92,7 @@ def record_provider_success(
     test_result: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Records a successful response/test for a provider, resetting all failure counters."""
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     now = datetime.now(timezone.utc)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if not cb:
@@ -115,10 +129,21 @@ def record_provider_failure(
     If consecutive failures reach 3, trips the circuit breaker for 10 minutes.
     Returns True if the circuit breaker is now tripped.
     """
+    p_name = normalize_provider_slot_key(provider_name)
     if reason == "rate_limited" and retry_after_seconds is not None and retry_after_seconds < 60:
+        cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
+        if not cb:
+            cb = ProviderCircuitBreaker(
+                provider_name=p_name,
+                consecutive_failures=0,
+                is_tripped=False,
+                last_test_result=test_result,
+                updated_at=datetime.now(timezone.utc),
+            )
+            db.add(cb)
+            db.commit()
         return False
 
-    p_name = provider_name.lower().strip()
     now = datetime.now(timezone.utc)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if not cb:
@@ -153,7 +178,7 @@ def reset_circuit_breaker(
     provider_name: str,
 ) -> None:
     """Manually resets a tripped circuit breaker (e.g. via 'Retry now' button)."""
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     now = datetime.now(timezone.utc)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if cb:
@@ -175,7 +200,7 @@ def record_provider_ttft(
     """
     if ttft_ms is None or ttft_ms <= 0:
         return None
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     now = datetime.now(timezone.utc)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if not cb:
@@ -213,7 +238,7 @@ def get_provider_median_ttft(
     provider_name: str,
 ) -> Optional[int]:
     """Returns the persisted median TTFT in ms for a provider."""
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     cb = db.query(ProviderCircuitBreaker).filter(ProviderCircuitBreaker.provider_name == p_name).first()
     if cb and cb.median_ttft_ms is not None:
         return cb.median_ttft_ms
@@ -229,7 +254,7 @@ def get_thinking_support_db(
     Retrieves the persisted parameter fallback status from the database with 7-day expiry.
     Returns False if thinking/reasoning control is known to be unsupported, True if supported, or None if unrecorded/expired.
     """
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     m_id = model_id.strip()
     now = datetime.now(timezone.utc)
 
@@ -267,7 +292,7 @@ def record_thinking_support_db(
     """
     Persists parameter support status in the database with a 7-day expiry.
     """
-    p_name = provider_name.lower().strip()
+    p_name = normalize_provider_slot_key(provider_name)
     m_id = model_id.strip()
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=7)

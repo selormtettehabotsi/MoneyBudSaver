@@ -67,4 +67,58 @@ export const councilApi = {
         method: "POST",
       }
     ),
+
+  updateModel: (provider_name: string, payload: any) =>
+    apiClient<any>(`/api/v1/council/providers/${provider_name}/model`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  revertModel: (provider_name: string, model_id: string) =>
+    apiClient<any>(`/api/v1/council/providers/${provider_name}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ model_id }),
+    }),
+
+  getRecommended: () =>
+    apiClient<Record<string, any[]>>("/api/v1/council/recommended"),
+
+  updateRecommended: (provider_name: string, models: string[]) =>
+    apiClient<{ status: string }>(`/api/v1/council/providers/${provider_name}/recommended`, {
+      method: "PUT",
+      body: JSON.stringify({ models }),
+    }),
+
+  useRecommended: (provider_name: string) =>
+    apiClient<any>(`/api/v1/council/providers/${provider_name}/use-recommended`, {
+      method: "POST",
+    }),
+
+  findWorking: (provider_name: string) =>
+    apiClient<any>(`/api/v1/council/providers/${provider_name}/find-working`, {
+      method: "POST",
+    }),
+
+  fixAll: () =>
+    apiClient<any>("/api/v1/council/providers/fix-all", {
+      method: "POST",
+    }),
+
+  getAutoSwitch: () =>
+    apiClient<any>("/api/v1/council/settings/auto-switch"),
+
+  updateAutoSwitch: (enabled: boolean) =>
+    apiClient<any>("/api/v1/council/settings/auto-switch", {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  getSwitchLogs: (limit: number = 50) =>
+    apiClient<any[]>(`/api/v1/council/switch-logs?limit=${limit}`),
+
+  revertSwitchLog: (log_id: string) =>
+    apiClient<{ status: string }>(`/api/v1/council/switch-logs/${log_id}/revert`, {
+      method: "POST",
+    }),
 };
+

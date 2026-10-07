@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { suggestionsApi, WeeklyReviewResult, SuggestionLogOut, SuggestionItem } from "../api/suggestions";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
+import { ApiErrorCard } from "../components/common/ApiErrorCard";
 import { useSync } from "../context/SyncContext";
+import {
+  formatRunway,
+  formatSavingsRate,
+  formatDTI,
+} from "../utils/formatters";
 import {
   Sparkles,
   RefreshCw,
@@ -28,19 +34,27 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
   const [historyLogs, setHistoryLogs] = useState<SuggestionLogOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [errorRequestId, setErrorRequestId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"current" | "history">("current");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
 
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      setErrorRequestId(null);
       const [reviewRes, historyRes] = await Promise.all([
         loadCachedOrFetch("weekly_review", () => suggestionsApi.getWeeklyReview(), (c) => { if (c) setReview(c); }),
         loadCachedOrFetch("suggestions_history", () => suggestionsApi.getHistory(), (c) => { if (c) setHistoryLogs(c); }),
       ]);
       if (reviewRes) setReview(reviewRes);
       if (historyRes) setHistoryLogs(historyRes);
-    } catch (err) {
+    } catch (err: any) {
+      if (!review) {
+        setError(err.message || "Failed to load smart insights.");
+        setErrorRequestId(err.requestId || null);
+      }
       console.error("Failed to load suggestions:", err);
     } finally {
       setLoading(false);
@@ -83,7 +97,7 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
     return item.severity === filterSeverity;
   }) || [];
 
-  if (loading) {
+  if (loading && !review) {
     return (
       <div className="flex items-center justify-center" style={{ minHeight: "50vh" }}>
         <RefreshCw size={28} className="text-indigo-400" style={{ animation: "spin 1s linear infinite" }} />
@@ -91,8 +105,22 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
     );
   }
 
+  if (error || !review) {
+    return (
+      <ApiErrorCard
+        title="Smart Insights Unavailable"
+        message={error || "Unable to retrieve audit recommendations."}
+        requestId={errorRequestId}
+        onRetry={loadData}
+        isRetrying={loading}
+      />
+    );
+  }
+
   const score = review?.health_score ?? 50;
   const pillars = review?.metrics_summary?.pillars;
+  const hasSufficient = review?.metrics_summary?.has_sufficient_data !== false;
+  const runwayDisplay = formatRunway(pillars?.runway?.runway_months, pillars?.runway?.display, hasSufficient);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -138,6 +166,27 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
       </div>
 
       <DisclaimerBanner />
+
+      {/* Limited Spending Data Notice */}
+      {!hasSufficient && (
+        <div
+          className="glass-panel flex items-center gap-3"
+          style={{
+            padding: "12px 16px",
+            background: "rgba(99, 102, 241, 0.08)",
+            border: "1px solid rgba(99, 102, 241, 0.25)",
+            borderRadius: "var(--radius-md)",
+            fontSize: "0.8125rem",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <Info size={18} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
+          <span>
+            <strong>Baseline spending data accumulating:</strong>{" "}
+            {review?.metrics_summary?.data_notice || "Add at least 2 weeks of spending for reliable advice."}
+          </span>
+        </div>
+      )}
 
       {activeTab === "current" && review && (
         <>
@@ -193,7 +242,7 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
                   <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
                     <span className="flex items-center gap-1">
                       <TrendingUp size={13} style={{ color: "var(--brand-primary)" }} />
-                      Savings Rate ({pillars.savings_rate.value_pct?.toFixed(1) || 0}%)
+                      Savings Rate ({formatSavingsRate(pillars.savings_rate.value_pct)})
                     </span>
                     <span style={{ fontWeight: 600 }}>{pillars.savings_rate.score} / 25 pts</span>
                   </div>
@@ -207,7 +256,7 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
                   <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
                     <span className="flex items-center gap-1">
                       <Shield size={13} style={{ color: "var(--success)" }} />
-                      Runway Buffer ({pillars.runway.runway_months?.toFixed(1) || 0} mos)
+                      Runway Buffer ({runwayDisplay})
                     </span>
                     <span style={{ fontWeight: 600 }}>{pillars.runway.score} / 25 pts</span>
                   </div>
@@ -221,7 +270,7 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
                   <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
                     <span className="flex items-center gap-1">
                       <CreditCard size={13} style={{ color: "var(--warning)" }} />
-                      Debt Burden (DTI: {pillars.debt_burden.dti_pct?.toFixed(1) || 0}%)
+                      Debt Burden (DTI: {formatDTI(pillars.debt_burden.dti_pct)})
                     </span>
                     <span style={{ fontWeight: 600 }}>{pillars.debt_burden.score} / 25 pts</span>
                   </div>

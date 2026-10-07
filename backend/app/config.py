@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     # AI Provider Engine Configuration
     AI_PROVIDER_TIMEOUT_SECONDS: int = 25
     AI_PROVIDER_DEFAULT_TIMEOUT_SECONDS: int = 25
-    NVIDIA_PROVIDER_TIMEOUT_SECONDS: int = 90
-    COUNCIL_JOB_TIMEOUT_SECONDS: int = 300  # 5 minutes max lifetime (longer than 2 debate rounds * 90s)
+    NVIDIA_PROVIDER_TIMEOUT_SECONDS: int = 100
+    COUNCIL_JOB_TIMEOUT_SECONDS: int = 360  # 6 minutes max lifetime (longer than 2 debate rounds * 100s budget)
     COUNCIL_MIN_QUORUM_VOTES: int = 3
     SHARED_KEY_STAGGER_INTERVAL_SECONDS: float = 1.5
 
@@ -63,9 +63,9 @@ class Settings(BaseSettings):
     DEFAULT_MIN_RUNWAY_MONTHS: float = 3.0
     DEFAULT_CURRENCY: str = "GHS"
 
-    # Provider API Keys & Model IDs (at least 5 different model families)
+    # Provider API Keys & Model IDs (Free-Only Lineup)
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL_ID: str = "gemini-3.8-flash"
+    GEMINI_MODEL_ID: str = "gemini-2.5-flash"
     GEMINI_FALLBACK_MODEL_ID: Optional[str] = None
     GEMINI_MODEL_FAMILY: Optional[str] = None
 
@@ -74,29 +74,27 @@ class Settings(BaseSettings):
     GROQ_FALLBACK_MODEL_ID: Optional[str] = None
     GROQ_MODEL_FAMILY: Optional[str] = None
 
-    MISTRAL_API_KEY: Optional[str] = None
-    MISTRAL_MODEL_ID: str = "mistral-small-latest"
-    MISTRAL_FALLBACK_MODEL_ID: Optional[str] = None
-    MISTRAL_MODEL_FAMILY: Optional[str] = None
+    GROQ_2_MODEL_ID: Optional[str] = "qwen-qwq-32b"
+    GROQ_2_FALLBACK_MODEL_ID: Optional[str] = None
+    GROQ_2_MODEL_FAMILY: Optional[str] = None
 
     OPENROUTER_API_KEY: Optional[str] = None
-    OPENROUTER_MODEL_ID: str = "qwen/qwen3.8-27b:free"
+    OPENROUTER_MODEL_ID: str = "nvidia/llama-3.1-nemotron-70b-instruct:free"
     OPENROUTER_FALLBACK_MODEL_ID: Optional[str] = None
     OPENROUTER_MODEL_FAMILY: Optional[str] = None
 
+    OPENROUTER_2_MODEL_ID: Optional[str] = "google/gemma-2-9b-it:free"
+    OPENROUTER_2_FALLBACK_MODEL_ID: Optional[str] = None
+    OPENROUTER_2_MODEL_FAMILY: Optional[str] = None
+
     NVIDIA_API_KEY: Optional[str] = None
-    NVIDIA_MODEL_ID: str = "z-ai/glm-5.3-flash"
+    NVIDIA_MODEL_ID: str = "meta/muse-glimmer-30b"
     NVIDIA_FALLBACK_MODEL_ID: Optional[str] = None
     NVIDIA_MODEL_FAMILY: Optional[str] = None
 
     NVIDIA_KIMI_MODEL_ID: Optional[str] = "moonshotai/kimi-k3"
     NVIDIA_KIMI_FALLBACK_MODEL_ID: Optional[str] = None
     NVIDIA_KIMI_MODEL_FAMILY: Optional[str] = None
-
-    CEREBRAS_API_KEY: Optional[str] = None
-    CEREBRAS_MODEL_ID: str = "llama3.3-70b"
-    CEREBRAS_FALLBACK_MODEL_ID: Optional[str] = None
-    CEREBRAS_MODEL_FAMILY: Optional[str] = None
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL_ID: str = "llama3.2"

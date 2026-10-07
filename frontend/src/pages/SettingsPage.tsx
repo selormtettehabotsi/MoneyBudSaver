@@ -5,14 +5,14 @@ import { usePinLock } from "../context/PinLockContext";
 import { useSync } from "../context/SyncContext";
 import { useServerStatus } from "../context/ServerStatusContext";
 import {
+  Server,
+  Globe,
   Shield,
-  Cpu,
+  Key,
   Check,
   CheckCircle2,
-  AlertTriangle,
   XCircle,
   Info,
-  Globe,
   Download,
   Upload,
   Database,
@@ -20,18 +20,11 @@ import {
   AlertCircle,
   RefreshCw,
   Layers,
-  Sparkles,
-  Zap,
-  Server,
   Lock,
   Unlock,
   KeyRound,
-  Key,
   Eye,
   EyeOff,
-  Copy,
-  ExternalLink,
-  Timer,
 } from "lucide-react";
 import {
   downloadTransactionsCsv,
@@ -43,9 +36,8 @@ import {
   ImportCsvResponse,
   RestoreBackupResponse,
 } from "../api/data";
-import { councilApi } from "../api/council";
 import { authApi } from "../api/auth";
-import { TestConnectionResponse } from "../types/council";
+import { AIModelsManager } from "../components/council/AIModelsManager";
 
 export const SettingsPage: React.FC = () => {
   const { user, updateSettings } = useAuth();
@@ -69,20 +61,6 @@ export const SettingsPage: React.FC = () => {
   const [minRunway, setMinRunway] = useState<number>(user?.settings?.min_runway_months || 3.0);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-
-
-  // Council Connection Test & Provider Status State
-  const [testResults, setTestResults] = useState<Record<string, TestConnectionResponse>>({});
-  const [testLoading, setTestLoading] = useState<Record<string, boolean>>({});
-  const [backendProviders, setBackendProviders] = useState<Record<string, any>>({});
-
-  React.useEffect(() => {
-    councilApi.getProviders().then((list) => {
-      const map: Record<string, any> = {};
-      list.forEach((p) => { map[p.name] = p; });
-      setBackendProviders(map);
-    }).catch(() => {});
-  }, []);
 
   // Security / PIN State
   const [pinInput, setPinInput] = useState("");
@@ -120,8 +98,6 @@ export const SettingsPage: React.FC = () => {
   const [restoreResult, setRestoreResult] = useState<RestoreBackupResponse | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
-
-  const isHosted = user?.is_hosted || false;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -256,45 +232,6 @@ export const SettingsPage: React.FC = () => {
       setPasswordLoading(false);
     }
   };
-
-  const handleTestConnection = async (providerKey: string, modelId: string) => {
-    setTestLoading((prev) => ({ ...prev, [providerKey]: true }));
-    try {
-      const res = await councilApi.testConnection(providerKey, modelId);
-      setTestResults((prev) => ({ ...prev, [providerKey]: res }));
-    } catch (err: any) {
-      const isRateLimit = err?.status === 429 || (err?.message && err.message.toLowerCase().includes("rate limit"));
-      setTestResults((prev) => ({
-        ...prev,
-        [providerKey]: {
-          provider_name: providerKey,
-          model_id: modelId,
-          http_status: isRateLimit ? 429 : null,
-          latency_ms: 0,
-          status: isRateLimit ? "rate_limited" : "error",
-          diagnosis: isRateLimit
-            ? "Rate limit exceeded (10 tests/min). Please wait a moment before testing again."
-            : err.message || "Failed to execute connection test.",
-          model_found_in_list: null,
-          available_models_count: 0,
-          close_matches: [],
-        },
-      }));
-    } finally {
-      setTestLoading((prev) => ({ ...prev, [providerKey]: false }));
-    }
-  };
-
-  const providerFamilies = [
-    { key: "gemini", name: "Google Gemini", family: "Google Gemini Family", defaultModel: "gemini-3.8-flash", icon: <Sparkles size={16} />, status: "Active (Free Tier)" },
-    { key: "groq", name: "Groq GPT-OSS", family: "OpenAI / GPT-OSS Family", defaultModel: "openai/gpt-oss-120b", icon: <Zap size={16} />, status: "Active (Ultra-Fast Free Tier)" },
-    { key: "mistral", name: "Mistral AI", family: "Mistral Family", defaultModel: "mistral-small-latest", icon: <Shield size={16} />, status: "Active (European Free Tier)" },
-    { key: "openrouter", name: "OpenRouter Qwen", family: "Qwen Family", defaultModel: "qwen/qwen3.8-27b:free", icon: <Globe size={16} />, status: "Active (Free Tier)" },
-    { key: "nvidia", name: "NVIDIA GLM", family: "Zhipu GLM", defaultModel: "z-ai/glm-5.3-flash", icon: <Cpu size={16} />, status: "Active (Free Tier - 40 RPM)" },
-    { key: "nvidia_kimi", name: "Kimi (NVIDIA)", family: "Moonshot Kimi", defaultModel: "moonshotai/kimi-k3", icon: <Cpu size={16} />, status: "Optional (Shared NIM Key)" },
-    { key: "cerebras", name: "Cerebras Llama", family: "Meta Llama Family", defaultModel: "llama3.3-70b", icon: <Cpu size={16} />, status: "Optional (Paid / Trial Only)" },
-    { key: "ollama", name: "Ollama (Local Offline)", family: "Self-Hosted Private", defaultModel: "llama3.2", icon: <Server size={16} />, status: isHosted ? "Disabled in Hosted Mode" : "Local / Offline Only" },
-  ];
 
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: "860px", width: "100%" }}>
@@ -1172,331 +1109,8 @@ export const SettingsPage: React.FC = () => {
         )}
       </div>
 
-      {/* 6. AI Council Provider Families Info */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-          <Cpu size={20} style={{ color: "var(--accent-purple)" }} />
-          <h3 style={{ fontSize: "17px" }}>Council AI Members & Model Families</h3>
-        </div>
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          The Council integrates 4+ distinct free model families to ensure unbiased consensus and independent financial deliberation.
-        </p>
-
-        <div className="flex flex-col gap-3">
-          {providerFamilies.map((p) => {
-            const isLocalDisabled = p.name.includes("Ollama") && isHosted;
-            const isLoading = testLoading[p.key] || false;
-            const res = testResults[p.key];
-            const bp = backendProviders[p.key];
-
-            const currentFamily = bp?.model_family || p.family;
-            const fallbackModel = bp?.fallback_model_id;
-            const medianTtft = bp?.median_ttft_ms ?? res?.median_ttft_ms;
-            const isEnabledInCouncil = bp?.enabled_in_council !== undefined
-              ? bp.enabled_in_council
-              : (user?.settings?.providers_enabled?.[p.key] ?? (p.key !== "cerebras" && p.key !== "ollama"));
-
-            const handleToggleCouncil = async (newVal: boolean) => {
-              const currentEnabled = { ...(user?.settings?.providers_enabled || {}) };
-              currentEnabled[p.key] = newVal;
-              try {
-                await updateSettings(selectedCurrency, {
-                  ...(user?.settings || {}),
-                  providers_enabled: currentEnabled,
-                });
-                setBackendProviders((prev) => ({
-                  ...prev,
-                  [p.key]: { ...prev[p.key], enabled_in_council: newVal },
-                }));
-              } catch (err: any) {
-                alert(err.message || "Failed to update provider status.");
-              }
-            };
-
-            return (
-              <div
-                key={p.key}
-                style={{
-                  padding: "14px 16px",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--bg-surface-solid)",
-                  border: "1px solid var(--border-color)",
-                  opacity: isLocalDisabled ? 0.6 : 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                }}
-              >
-                <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "10px" }}>
-                  <div className="flex items-center gap-3">
-                    <div
-                      style={{
-                        width: "34px",
-                        height: "34px",
-                        borderRadius: "var(--radius-sm)",
-                        background: "var(--bg-surface-raised)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "var(--accent-primary)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {p.icon}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <strong style={{ color: "var(--text-primary)" }}>{p.name}</strong>
-                        {medianTtft !== null && medianTtft !== undefined && medianTtft > 0 && (
-                          <span
-                            className="badge badge-secondary flex items-center gap-1"
-                            style={{ fontSize: "10px", padding: "1px 6px" }}
-                            title="Rolling median Time to First Token"
-                          >
-                            <Timer size={10} />
-                            <span>Median TTFT: <strong>{medianTtft}ms</strong></span>
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                        Family: <strong>{currentFamily}</strong> • Model: <code>{p.defaultModel}</code>
-                        {fallbackModel && (
-                          <span> • Fallback: <code>{fallbackModel}</code></span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    {/* Use in Council Toggle */}
-                    {!isLocalDisabled && (
-                      <label className="flex items-center gap-1.5" style={{ fontSize: "12px", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={isEnabledInCouncil}
-                          onChange={(e) => handleToggleCouncil(e.target.checked)}
-                        />
-                        <span style={{ color: isEnabledInCouncil ? "var(--text-primary)" : "var(--text-muted)", fontWeight: 500 }}>
-                          Use in Council
-                        </span>
-                      </label>
-                    )}
-
-                    <span className={`badge ${isLocalDisabled ? "badge-warning" : "badge-secondary"}`} style={{ fontSize: "11px" }}>
-                      {p.status}
-                    </span>
-
-                    <button
-                      type="button"
-                      disabled={isLocalDisabled || isLoading || !isOnline}
-                      onClick={() => handleTestConnection(p.key, p.defaultModel)}
-                      className="btn btn-secondary btn-sm flex items-center gap-1"
-                      style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
-                      title="Sends a fixed ping without financial data and tests chat-capable catalog"
-                    >
-                      {isLoading ? (
-                        <>
-                          <RefreshCw size={13} className="animate-spin" />
-                          <span>Testing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Cpu size={13} />
-                          <span>Test</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Connection Test Result Diagnosis Card */}
-                {res && (
-                  <div
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: "var(--radius-sm)",
-                      background:
-                        res.status === "success"
-                          ? "rgba(16, 185, 129, 0.08)"
-                          : res.status === "invalid_key"
-                          ? "rgba(239, 68, 68, 0.08)"
-                          : "rgba(245, 158, 11, 0.08)",
-                      border:
-                        res.status === "success"
-                          ? "1px solid rgba(16, 185, 129, 0.25)"
-                          : res.status === "invalid_key"
-                          ? "1px solid rgba(239, 68, 68, 0.25)"
-                          : "1px solid rgba(245, 158, 11, 0.25)",
-                      fontSize: "12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
-                    }}
-                  >
-                    <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "6px" }}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`badge ${
-                            res.status === "success"
-                              ? "badge-success"
-                              : res.status === "invalid_key"
-                              ? "badge-danger"
-                              : "badge-warning"
-                          }`}
-                          style={{ fontSize: "11px", textTransform: "capitalize" }}
-                        >
-                          {res.status.replace("_", " ")}
-                        </span>
-                        {res.http_status && (
-                          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-                            HTTP {res.http_status}
-                          </span>
-                        )}
-                        {res.catalog_ok !== undefined && (
-                          <span className={`badge ${res.catalog_ok ? "badge-info" : "badge-secondary"}`} style={{ fontSize: "10px" }}>
-                            Catalog: {res.catalog_ok ? "OK" : "Failed"}
-                          </span>
-                        )}
-                        {res.chat_status && (
-                          <span className={`badge ${res.chat_status === "ok" || res.chat_status === "success" ? "badge-success" : "badge-warning"}`} style={{ fontSize: "10px" }}>
-                            Chat: {res.chat_status}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                        {res.ttft_ms !== null && res.ttft_ms !== undefined && (
-                          <span className="flex items-center gap-1" title="Time to first token">
-                            <Timer size={11} />
-                            <span>TTFT: <strong>{res.ttft_ms}ms</strong></span>
-                          </span>
-                        )}
-                        {res.median_ttft_ms !== null && res.median_ttft_ms !== undefined && (
-                          <span className="flex items-center gap-1" title="Rolling median TTFT">
-                            <span>(Median: <strong>{res.median_ttft_ms}ms</strong>)</span>
-                          </span>
-                        )}
-                        {res.latency_ms > 0 && (
-                          <span>Total: <strong>{res.latency_ms}ms</strong></span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ color: "var(--text-primary)", lineHeight: "1.4" }}>
-                      {res.diagnosis}
-                    </div>
-
-                    {/* Rate Limit Retry-After Warning */}
-                    {res.retry_after_seconds && (
-                      <div className="badge-warning flex items-center gap-1.5" style={{ padding: "6px 10px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
-                        <AlertCircle size={13} />
-                        <span>Rate limited. Recommended retry in <strong>{res.retry_after_seconds} seconds</strong>.</span>
-                      </div>
-                    )}
-
-                    {/* OpenRouter Privacy Hint */}
-                    {res.privacy_hint && (
-                      <div className="badge-warning flex items-start gap-1.5" style={{ padding: "8px 10px", borderRadius: "var(--radius-xs)", fontSize: "11px" }}>
-                        <Info size={13} style={{ flexShrink: 0, marginTop: "2px" }} />
-                        <div>
-                          <span>{res.privacy_hint}</span>{" "}
-                          <a
-                            href="https://openrouter.ai/settings/privacy"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ textDecoration: "underline", color: "var(--accent-primary)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "2px" }}
-                          >
-                            <span>OpenRouter Privacy Settings</span>
-                            <ExternalLink size={10} />
-                          </a>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Catalog Listing Status */}
-                    {res.model_found_in_list === true && (
-                      <div className="flex items-center gap-1.5" style={{ color: "var(--accent-emerald)", fontSize: "11px" }}>
-                        <CheckCircle2 size={13} className="text-emerald-400" style={{ flexShrink: 0 }} />
-                        <span>Model ID verified in chat catalog ({res.available_models_count} chat models available).</span>
-                      </div>
-                    )}
-
-                    {res.model_found_in_list === false && (
-                      <div className="flex items-center gap-1.5" style={{ color: "var(--accent-warning)", fontSize: "11px" }}>
-                        <AlertTriangle size={13} className="text-amber-400" style={{ flexShrink: 0 }} />
-                        <span>
-                          Model ID not found in chat catalog ({res.available_models_count} chat models).
-                          {res.close_matches.length > 0 && (
-                            <span style={{ marginLeft: "4px" }}>
-                              Did you mean: <strong>{res.close_matches.join(", ")}</strong>?
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Alternative Model Suggestions on Capacity Issue / Probe Hang */}
-                    {res.alternative_models && res.alternative_models.length > 0 && (
-                      <div style={{ marginTop: "4px", padding: "6px 10px", borderRadius: "var(--radius-xs)", background: "rgba(99, 102, 241, 0.1)", border: "1px solid rgba(99, 102, 241, 0.25)" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "4px" }}>
-                          Suggested Alternative Models from Catalog:
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {res.alternative_models.map((alt) => (
-                            <button
-                              key={alt}
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(alt);
-                                alert(`Copied alternative Model ID to clipboard:\n${alt}`);
-                              }}
-                              className="btn btn-secondary btn-sm flex items-center gap-1"
-                              style={{ padding: "3px 7px", fontSize: "10px", minHeight: "24px" }}
-                            >
-                              <Copy size={10} />
-                              <code>{alt}</code>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Catalog Models List with One-Click Copy */}
-                    {res.free_models && res.free_models.length > 0 && (
-                      <div style={{ marginTop: "4px", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "6px" }}>
-                          {res.available_models_label || "Available Free Models"}:
-                        </div>
-                        <div className="flex flex-wrap gap-1.5" style={{ maxHeight: "140px", overflowY: "auto" }}>
-                          {res.free_models.map((mId) => (
-                            <button
-                              key={mId}
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(mId);
-                                alert(`Copied model ID to clipboard:\n${mId}`);
-                              }}
-                              className="btn btn-secondary btn-sm flex items-center gap-1"
-                              style={{ padding: "3px 7px", fontSize: "10px", minHeight: "26px" }}
-                              title="Click to copy Model ID"
-                            >
-                              <Copy size={10} />
-                              <code>{mId}</code>
-                              {p.key === "openrouter" && (
-                                <span className="badge badge-success" style={{ fontSize: "8px", padding: "1px 3px" }}>Free</span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* 6. AI Council Models & Voters Manager */}
+      <AIModelsManager />
     </div>
   );
 };

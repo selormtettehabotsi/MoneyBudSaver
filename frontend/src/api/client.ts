@@ -59,7 +59,10 @@ export async function apiClient<T>(
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: "Request failed" }));
         const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status} Error`;
-        throw new Error(errorMessage);
+        const err: any = new Error(errorMessage);
+        err.status = response.status;
+        err.requestId = errorData.request_id;
+        throw err;
       }
 
       return (await response.json()) as T;

@@ -6,6 +6,7 @@ import { CashFlowChart } from "../components/dashboard/CashFlowChart";
 import { BudgetProgress } from "../components/dashboard/BudgetProgress";
 import { DebtTimeline } from "../components/dashboard/DebtTimeline";
 import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
+import { ApiErrorCard } from "../components/common/ApiErrorCard";
 import { useSync } from "../context/SyncContext";
 import {
   PlusCircle,
@@ -14,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   BarChart2,
+  Info,
 } from "lucide-react";
 
 interface DashboardPageProps {
@@ -29,11 +31,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorRequestId, setErrorRequestId] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState<boolean>(true);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setErrorRequestId(null);
     try {
       const res = await loadCachedOrFetch(
         "dashboard_summary",
@@ -48,6 +52,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     } catch (err: any) {
       if (!data) {
         setError(err.message || "Failed to load dashboard data.");
+        setErrorRequestId(err.requestId || null);
       }
     } finally {
       setLoading(false);
@@ -77,13 +82,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   if (error || !data) {
     return (
-      <div className="glass-panel" style={{ padding: "32px", textAlign: "center" }}>
-        <p style={{ color: "var(--danger)", marginBottom: "16px" }}>{error || "Unable to load data."}</p>
-        <button className="btn btn-primary btn-sm" onClick={loadData} style={{ minHeight: "44px" }}>
-          <RefreshCw size={14} />
-          <span>Try Again</span>
-        </button>
-      </div>
+      <ApiErrorCard
+        title="Dashboard Unavailable"
+        message={error || "Unable to retrieve real-time financial metrics."}
+        requestId={errorRequestId}
+        onRetry={loadData}
+        isRetrying={loading}
+      />
     );
   }
 
@@ -129,6 +134,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* Financial Advice Disclaimer */}
       <DisclaimerBanner />
+
+      {/* Insufficient Spending History Notice Banner */}
+      {!data.has_sufficient_data && (
+        <div
+          className="glass-panel flex items-center gap-3"
+          style={{
+            padding: "12px 16px",
+            background: "rgba(99, 102, 241, 0.08)",
+            border: "1px solid rgba(99, 102, 241, 0.25)",
+            borderRadius: "var(--radius-md)",
+            fontSize: "0.8125rem",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <Info size={18} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
+          <span>
+            <strong>Accumulating baseline spending data:</strong>{" "}
+            {data.data_notice || "Add at least 2 weeks of spending for reliable advice."}
+          </span>
+        </div>
+      )}
 
       {/* Top 4 Key Metric KPI Cards (Always visible first) */}
       <MetricCards data={data} />

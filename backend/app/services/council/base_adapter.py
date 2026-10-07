@@ -2,7 +2,7 @@ import asyncio
 import random
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import httpx
 from app.config import settings
 from app.core.security import redact_sensitive_info
@@ -50,8 +50,6 @@ async def wait_for_provider_pacing(provider_name: str, min_interval_seconds: flo
     """
     norm_name = provider_name.lower().strip()
     eff_interval = min_interval_seconds
-    if eff_interval <= 0.0 and norm_name == "mistral":
-        eff_interval = getattr(settings, "MISTRAL_MIN_REQUEST_INTERVAL_SECONDS", 1.5)
     if eff_interval <= 0.0:
         return
 
@@ -97,6 +95,10 @@ class BaseProviderAdapter(ABC):
         model_id: str,
         fallback_model_id: Optional[str] = None,
         timeout_seconds: int = 25,
+        temperature: float = 0.5,
+        top_p: float = 0.95,
+        max_tokens: int = 4096,
+        exclude_slow_round2: bool = False,
         shared_rate_limit_key: Optional[str] = None,
         stagger_interval_seconds: float = 1.5,
         min_request_interval_seconds: Optional[float] = None,
@@ -107,9 +109,13 @@ class BaseProviderAdapter(ABC):
         self.model_id = model_id
         self.fallback_model_id = fallback_model_id
         self.timeout_seconds = timeout_seconds
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
+        self.exclude_slow_round2 = exclude_slow_round2
         self.shared_rate_limit_key = shared_rate_limit_key
         self.stagger_interval_seconds = stagger_interval_seconds
-        self.min_request_interval_seconds = min_request_interval_seconds if min_request_interval_seconds is not None else (1.5 if name.lower() == "mistral" else 0.0)
+        self.min_request_interval_seconds = min_request_interval_seconds if min_request_interval_seconds is not None else 0.0
 
     @abstractmethod
     def is_configured(self) -> bool:
@@ -131,7 +137,7 @@ class BaseProviderAdapter(ABC):
 class OpenAICompatibleAdapter(BaseProviderAdapter):
     """
     Adapter for any OpenAI-compatible provider:
-    Groq, NVIDIA NIM (GLM & Kimi), Cerebras, Mistral, OpenRouter, and Ollama.
+    Groq (1 & 2), NVIDIA NIM (1 & 2), OpenRouter (1 & 2), Custom (1 & 2), and Ollama.
     """
     def __init__(
         self,
@@ -145,7 +151,10 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         is_local: bool = False,
         extra_headers: Optional[Dict[str, str]] = None,
         timeout_seconds: int = 25,
+        temperature: float = 0.5,
+        top_p: float = 0.95,
         max_tokens: int = 4096,
+        exclude_slow_round2: bool = False,
         reasoning_effort: Optional[str] = "low",
         reasoning_max_tokens: Optional[int] = None,
         shared_rate_limit_key: Optional[str] = None,
@@ -159,6 +168,10 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             model_id=model_id,
             fallback_model_id=fallback_model_id,
             timeout_seconds=timeout_seconds,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            exclude_slow_round2=exclude_slow_round2,
             shared_rate_limit_key=shared_rate_limit_key,
             stagger_interval_seconds=stagger_interval_seconds,
             min_request_interval_seconds=min_request_interval_seconds,
@@ -167,7 +180,6 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         self.api_key = api_key
         self.is_local = is_local
         self.extra_headers = extra_headers or {}
-        self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.reasoning_max_tokens = reasoning_max_tokens
 
@@ -197,7 +209,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 status="not_configured",
                 round_number=round_number,
                 latency_ms=0,
-                error_message="Model ID not set in configuration.",
+                error_message="Model ID not set in configuration (choose a model).",
             )
 
         if not self.is_configured():
@@ -212,7 +224,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 error_message="API Key not configured in environment.",
             )
 
-        endpoint = f"{self.base_url}/chat/completions"
+        endpoint = f"{self.base_url}/chat/completions" if not self.is_local else f"{self.base_url}/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
             **self.extra_headers,
@@ -229,7 +241,8 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 },
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.2,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
             "max_tokens": self.max_tokens,
             "response_format": {"type": "json_object"} if not self.is_local else None,
         }
@@ -245,7 +258,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         except Exception:
             pass
 
-        # Provider-specific reasoning / thinking parameter configuration (treated as optional extras)
+        # Provider-specific reasoning / thinking parameter configuration
         if self.name not in _UNSUPPORTED_THINKING_PROVIDERS:
             if "openrouter" in self.name or "openrouter.ai" in self.base_url:
                 if self.reasoning_effort:
@@ -325,6 +338,20 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         if res.status_code == 429:
             retry_after_str = res.headers.get("Retry-After")
             retry_secs = parse_retry_after(retry_after_str)
+            # Check if error message indicates quota exhaustion (not free)
+            err_text = res.text.lower()
+            if any(q in err_text for q in ("insufficient", "quota", "credit", "balance", "billable")):
+                return IndividualVote(
+                    provider_name=self.name,
+                    display_name=self.display_name,
+                    model_id=self.model_id,
+                    model_family=self.model_family,
+                    model_used=model_name_used,
+                    is_fallback=is_fallback_model,
+                    status="rate_limited",
+                    round_number=round_number,
+                    error_message="not free, disabled: Free quota exhausted or billing required.",
+                )
             return IndividualVote(
                 provider_name=self.name,
                 display_name=self.display_name,
@@ -359,7 +386,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 model_family=self.model_family,
                 model_used=model_name_used,
                 is_fallback=is_fallback_model,
-                status="failed",
+                status="invalid_key",
                 round_number=round_number,
                 error_message=f"Invalid API Key: Provider rejected authentication (HTTP {res.status_code}).",
             )
@@ -374,7 +401,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 is_fallback=is_fallback_model,
                 status="unavailable",
                 round_number=round_number,
-                error_message="Provider credits exhausted / payment required (HTTP 402). Model unavailable.",
+                error_message="not free, disabled: Provider credits exhausted / payment required (HTTP 402).",
             )
 
         if res.status_code == 404:
@@ -385,9 +412,9 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 model_family=self.model_family,
                 model_used=model_name_used,
                 is_fallback=is_fallback_model,
-                status="unavailable",
+                status="model_not_found",
                 round_number=round_number,
-                error_message=f"Model ID '{model_name_used}' not found or deprecated by provider (HTTP 404). Model unavailable.",
+                error_message=f"Model ID '{model_name_used}' no longer exists for provider '{self.name}', fix in Settings (HTTP 404).",
             )
 
         if res.status_code != 200:
@@ -405,6 +432,28 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             )
 
         data = res.json()
+
+        # Free-only enforcement check: non-zero cost rejection
+        if "openrouter" in self.name or "openrouter.ai" in self.base_url:
+            usage = data.get("usage", {})
+            cost = usage.get("total_cost") or usage.get("cost")
+            if cost is not None:
+                try:
+                    if float(cost) > 0.0:
+                        return IndividualVote(
+                            provider_name=self.name,
+                            display_name=self.display_name,
+                            model_id=self.model_id,
+                            model_family=self.model_family,
+                            model_used=model_name_used,
+                            is_fallback=is_fallback_model,
+                            status="failed",
+                            round_number=round_number,
+                            error_message="Free-only enforcement: Model returned non-zero cost, usage stopped.",
+                        )
+                except (ValueError, TypeError):
+                    pass
+
         choice = data.get("choices", [{}])[0]
         finish_reason = choice.get("finish_reason")
 
@@ -422,6 +471,17 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             )
 
         content = choice.get("message", {}).get("content", "")
+
+        # If empty response, retry once with temperature=1.0
+        if not content or not content.strip():
+            temp_retry_payload = dict(payload)
+            temp_retry_payload["temperature"] = 1.0
+            retry_res = await client.post(endpoint, json=temp_retry_payload, headers=headers)
+            if retry_res.status_code == 200:
+                retry_data = retry_res.json()
+                choice = retry_data.get("choices", [{}])[0]
+                content = choice.get("message", {}).get("content", "")
+
         parsed = extract_and_repair_json(content)
         is_valid, norm, err = validate_and_normalize_vote(parsed)
 
@@ -463,11 +523,10 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         timeout_seconds: int,
         round_number: int,
     ) -> IndividualVote:
-        # Up to 2 retries (3 attempts total) on transient errors (502, 503, 529, 429, overloaded)
         last_vote: Optional[IndividualVote] = None
 
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
                 for attempt in range(3):
                     try:
                         vote = await self._execute_single_attempt(
@@ -494,7 +553,6 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                         )
 
                         if is_transient and attempt < 2:
-                            # Exponential backoff + jitter (honour Retry-After + 0.5s + jitter)
                             if vote.status == "rate_limited" and "Retry in" in (vote.error_message or ""):
                                 import re
                                 m = re.search(r'Retry in (\d+) seconds', vote.error_message or "")
@@ -505,7 +563,6 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                             await asyncio.sleep(delay)
                             continue
 
-                        # If not transient or out of retries, break loop to consider fallback model
                         break
 
                     except httpx.TimeoutException:
@@ -526,7 +583,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                             continue
                         break
 
-                # If primary model failed after retries and fallback_model_id is configured, attempt fallback
+                # If primary model failed and fallback_model_id is configured, attempt fallback
                 if (
                     last_vote
                     and last_vote.status != "success"
@@ -576,4 +633,3 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 round_number=round_number,
                 error_message=clean_exc,
             )
-

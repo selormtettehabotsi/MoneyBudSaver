@@ -1,7 +1,15 @@
 import React from "react";
-import { TrendingUp, TrendingDown, Clock, CreditCard, PiggyBank } from "lucide-react";
+import { TrendingUp, TrendingDown, Clock, CreditCard, PiggyBank, Info } from "lucide-react";
 import { useCurrency } from "../../context/CurrencyContext";
 import { DashboardData } from "../../types/finance";
+import {
+  formatRunway,
+  getRunwayStatus,
+  getRunwayNotice,
+  formatDTI,
+  getDTIStatus,
+  formatSavingsRate,
+} from "../../utils/formatters";
 
 interface MetricCardsProps {
   data: DashboardData;
@@ -12,13 +20,18 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
   const netNum = parseFloat(data.net_cashflow_current_month || "0");
   const isNetPositive = netNum >= 0;
 
-  // DTI Status
-  const dti = data.debt_to_income_ratio || 0;
-  const dtiStatus = dti > 40 ? "danger" : dti > 25 ? "warning" : "success";
+  // DTI Status & Formatting
+  const dtiVal = data.debt_to_income_ratio;
+  const dtiBadge = getDTIStatus(dtiVal);
 
-  // Runway Status
-  const runway = data.runway_months || 0;
-  const runwayStatus = runway < 3 ? "danger" : runway < 6 ? "warning" : "success";
+  // Runway Status & Formatting
+  const hasSufficient = data.has_sufficient_data !== false;
+  const runwayBadge = getRunwayStatus(data.runway_months, hasSufficient);
+  const runwayDisplay = formatRunway(data.runway_months, data.runway_display, hasSufficient);
+  const runwayNotice = getRunwayNotice(hasSufficient, data.data_notice);
+
+  const savingsRateDisplay = formatSavingsRate(data.savings_rate_percentage);
+  const isSavingsOnTarget = (data.savings_rate_percentage ?? 0) >= 20;
 
   return (
     <div className="metrics-grid" style={{ marginBottom: "24px" }}>
@@ -79,6 +92,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
           justifyContent: "space-between",
           minHeight: "140px",
           minWidth: 0,
+          position: "relative",
         }}
       >
         <div className="flex items-center justify-between" style={{ marginBottom: "8px" }}>
@@ -100,20 +114,40 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
         <div
           className="tabular-nums"
           style={{
-            fontSize: "clamp(1.15rem, 3.8vw, 1.5rem)",
+            fontSize: hasSufficient ? "clamp(1.15rem, 3.8vw, 1.5rem)" : "clamp(0.95rem, 2.5vw, 1.15rem)",
             fontWeight: 800,
-            color: "var(--text-primary)",
+            color: hasSufficient ? "var(--text-primary)" : "var(--text-secondary)",
             letterSpacing: "-0.02em",
           }}
         >
-          {runway >= 990 ? "99+ mo" : `${runway.toFixed(1)} mo`}
+          {runwayDisplay}
         </div>
-        <div className="flex items-center justify-between" style={{ marginTop: "8px" }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} title={formatMoney(data.total_liquid_savings)}>
-            {formatMoney(data.total_liquid_savings)}
-          </span>
-          <span className={`badge badge-${runwayStatus}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
-            {runwayStatus === "success" ? "Healthy" : runwayStatus === "warning" ? "Moderate" : "Low"}
+        <div className="flex items-center justify-between" style={{ marginTop: "8px", gap: "4px" }}>
+          {hasSufficient ? (
+            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} title={formatMoney(data.total_liquid_savings)}>
+              {formatMoney(data.total_liquid_savings)}
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: "0.7rem",
+                color: "var(--brand-accent)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "3px",
+                maxWidth: "140px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={runwayNotice || "Add at least 2 weeks of spending for reliable advice."}
+            >
+              <Info size={11} style={{ flexShrink: 0 }} />
+              2+ wks needed
+            </span>
+          )}
+          <span className={`badge ${runwayBadge.badgeClass}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
+            {runwayBadge.label}
           </span>
         </div>
       </div>
@@ -155,12 +189,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
             letterSpacing: "-0.02em",
           }}
         >
-          {data.savings_rate_percentage?.toFixed(1) || "0.0"}%
+          {savingsRateDisplay}
         </div>
         <div className="flex items-center justify-between" style={{ marginTop: "8px" }}>
           <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Target: 20%</span>
-          <span className={`badge ${data.savings_rate_percentage >= 20 ? "badge-success" : "badge-warning"}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
-            {data.savings_rate_percentage >= 20 ? "On Target" : "Under"}
+          <span className={`badge ${isSavingsOnTarget ? "badge-success" : "badge-warning"}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
+            {isSavingsOnTarget ? "On Target" : "Under"}
           </span>
         </div>
       </div>
@@ -185,8 +219,8 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
             style={{
               padding: "6px",
               borderRadius: "var(--radius-sm)",
-              background: dtiStatus === "danger" ? "var(--danger-bg)" : "rgba(245, 158, 11, 0.12)",
-              color: dtiStatus === "danger" ? "var(--danger)" : "var(--warning)",
+              background: dtiBadge.status === "danger" ? "var(--danger-bg)" : "rgba(245, 158, 11, 0.12)",
+              color: dtiBadge.status === "danger" ? "var(--danger)" : "var(--warning)",
               flexShrink: 0,
             }}
           >
@@ -202,14 +236,14 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ data }) => {
             letterSpacing: "-0.02em",
           }}
         >
-          {dti.toFixed(1)}%
+          {formatDTI(dtiVal)}
         </div>
         <div className="flex items-center justify-between" style={{ marginTop: "8px" }}>
           <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }} title={formatMoney(data.total_debt_balance)}>
             Debt: {formatMoney(data.total_debt_balance)}
           </span>
-          <span className={`badge badge-${dtiStatus}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
-            {dtiStatus === "success" ? "Safe" : dtiStatus === "warning" ? "Caution" : "Critical"}
+          <span className={`badge ${dtiBadge.badgeClass}`} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
+            {dtiBadge.label}
           </span>
         </div>
       </div>

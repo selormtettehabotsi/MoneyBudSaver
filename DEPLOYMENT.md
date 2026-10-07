@@ -31,20 +31,21 @@ Follow these steps to deploy a live web app accessible from your phone, tablet, 
 
 ---
 
-### Step 2: Obtain Free Multi-AI Provider API Keys
-MoneyCouncil integrates 5 distinct free-tier AI model families to ensure unbiased multi-model council consensus. *Note: Free tiers and model availability change over time—use the console links below to manage your keys.*
+### Step 2: Obtain Free Multi-AI Provider API Keys (Free-Tier Only)
+MoneyCouncil integrates 4 distinct free-tier AI model families plus custom slots to ensure unbiased multi-model council consensus without any financial cost.
+
+> [!CAUTION]
+> **CRITICAL: DO NOT ADD BILLING TO ANY PROVIDER ACCOUNT.**
+> MoneyCouncil is engineered to be **100% FREE-ONLY**. All default and recommended models operate entirely within free tiers. If a provider's free quota is exhausted, MoneyCouncil automatically disables or skips that model rather than incurring charges. Do not attach credit cards or billing to your provider accounts.
 
 | Provider | Free Tier Console Link | Model Family | Default Verified Model ID | Rate Limit / Quota |
 | :--- | :--- | :--- | :--- | :--- |
-| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | Google | `gemini-3.8-flash` | Free tier (~15 RPM, 1500 RPD) |
-| **Groq** | [console.groq.com](https://console.groq.com/) | OpenAI open model | `openai/gpt-oss-120b` | Free tier (~30 RPM, 14.4k RPD) |
-| **Mistral AI** | [console.mistral.ai](https://console.mistral.ai/) | Mistral | `mistral-small-latest` | Free tier (~1 req/s, 1000 RPD) |
-| **OpenRouter** | [openrouter.ai](https://openrouter.ai/models) | Qwen | `qwen/qwen3.8-27b:free` *(Fallback: `inclusionai/ling-3.1-flash`)* | Free tier (~200 RPD on free models) |
-| **NVIDIA NIM** | [build.nvidia.com](https://build.nvidia.com/) | Zhipu GLM & Moonshot Kimi | `z-ai/glm-5.3-flash` *(2nd: `moonshotai/kimi-k3`)* | Free tier (~40 RPM shared limit, requires SMS verification) |
+| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com/) | Google | `gemini-2.5-flash` | Free tier (~15 RPM, 1500 RPD) |
+| **Groq** | [console.groq.com](https://console.groq.com/) | OpenAI open model / Qwen | `openai/gpt-oss-120b` | Free tier (~30 RPM, 14.4k RPD) |
+| **OpenRouter** | [openrouter.ai](https://openrouter.ai/models) | Nemotron / Gemma / DeepSeek | `nvidia/llama-3.1-nemotron-70b-instruct:free` | Free models only ($0.00 prompt & completion) |
+| **NVIDIA NIM** | [build.nvidia.com](https://build.nvidia.com/) | Meta Muse / Kimi / GLM | `meta/muse-glimmer-30b` *(2nd: `moonshotai/kimi-k3`)* | Free endpoint (~40 RPM, phone verification) |
 
-*(Optional: Cerebras is also supported as an optional paid/trial provider `llama3.3-70b` at [cloud.cerebras.ai](https://cloud.cerebras.ai/)).*
-
-*(You can configure any subset of keys — 1, 2, 3, or all 5. The Council runs normally with any subset of keys, showing unconfigured members as "not configured" rather than throwing an error!)*
+*(Note: Mistral, Cerebras, and Anthropic have been completely removed. All model IDs, fallbacks, families, timeouts, and toggles live in the database and are managed directly from the website's AI Models manager screen!)*
 
 ---
 
@@ -61,7 +62,7 @@ MoneyCouncil integrates 5 distinct free-tier AI model families to ensure unbiase
    ```bash
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
-6. In the **Environment Variables** section, add:
+6. In the **Environment Variables** section, add only your API keys:
    ```ini
    ENVIRONMENT=production
    DEPLOYMENT_MODE=hosted
@@ -70,12 +71,10 @@ MoneyCouncil integrates 5 distinct free-tier AI model families to ensure unbiase
    DATABASE_URL=postgresql://username:password@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
    GEMINI_API_KEY=your_gemini_api_key_here
    GROQ_API_KEY=your_groq_api_key_here
-   MISTRAL_API_KEY=your_mistral_api_key_here
    OPENROUTER_API_KEY=your_openrouter_api_key_here
    NVIDIA_API_KEY=your_nvidia_api_key_here
-   # Optional 2nd NIM model / Paid: CEREBRAS_API_KEY=your_cerebras_key
    ```
-7. Click **Create Web Service**. Render will build the React PWA and deploy the FastAPI container.
+7. Click **Create Web Service**. Render will build the React PWA and deploy the FastAPI container. Model configurations and fallbacks will be automatically seeded into your PostgreSQL database on first launch.
 
 ---
 

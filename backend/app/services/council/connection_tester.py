@@ -1,21 +1,30 @@
 """
 Service for testing AI Council provider connections, verifying credentials,
-measuring latency & TTFT with fixed non-financial test prompts, and querying model catalogs with pricing.
-Supports chat-capable model filtering, non-misleading catalog labeling, rate pacing,
-concurrent 45s NVIDIA probes with capacity diagnosis & alternative suggestions, and median TTFT recording.
+measuring latency & TTFT with fixed non-financial test prompts, querying model catalogs,
+enforcing Free-Only eligibility, ranking model candidates (non-alphabetical),
+concurrent 90s NVIDIA probes, and rolling median TTFT tracking.
 """
 import asyncio
 import difflib
 import json
+import os
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Set
 import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.security import redact_sensitive_info
 from app.db.session import SessionLocal
-from app.schemas.council import TestConnectionResponse
+from app.models.council import ProviderSetting, RecommendedModel, FreeTierAllowlist
+from app.schemas.council import (
+    TestConnectionResponse,
+    FindWorkingModelCandidateResult,
+)
+from app.services.council.adapters_factory import (
+    derive_model_family,
+    get_resolved_provider_config,
+)
 from app.services.council.base_adapter import (
     _UNSUPPORTED_THINKING_PROVIDERS,
     parse_retry_after,
@@ -32,6 +41,11 @@ from app.services.council.health_manager import (
     get_provider_median_ttft,
 )
 from app.services.council.json_repair import extract_and_repair_json
+from app.services.council.ssrf_protection import validate_custom_endpoint_url
+from app.services.council.pattern_resolver import (
+    get_patterns_for_provider,
+    resolve_provider_recommended_patterns,
+)
 
 TEST_PING_PROMPT = "Ping! Respond strictly with the following JSON object and nothing else: {\"status\": \"ok\", \"ping\": \"pong\"}"
 TEST_SYSTEM_INSTRUCTION = "You are an automated JSON connectivity test agent. Output strictly valid JSON."
@@ -74,16 +88,19 @@ def is_chat_capable_model(
 
     # 2. Name-based rule fallback
     # Embeddings
-    if any(k in mid_clean for k in ("embed", "-embedding", "/embedding", "text-embedding", "bge-large", "bge-small", "bge-base")):
+    if any(k in mid_clean for k in ("embed", "-embedding", "/embedding", "text-embedding", "nv-embed", "bge-large", "bge-small", "bge-base")):
         return False
     # Audio / Speech / TTS
-    if any(k in mid_clean for k in ("whisper", "tts", "text-to-speech", "speech", "voice", "audio", "orpheus", "seamless")):
+    if any(k in mid_clean for k in ("whisper", "tts", "text-to-speech", "speech", "voice", "audio", "orpheus", "seamless", "parakeet")):
         return False
-    # Image Gen / Vision-only output
-    if any(k in mid_clean for k in ("dall-e", "imagen", "flux", "stable-diffusion", "sdxl", "midjourney", "image-generation", "instruct-pix2pix", "upscale")):
+    # Vision-only / OCR / Parse
+    if any(k in mid_clean for k in ("fuyu", "nemotron-parse", "nougat", "ocr", "parse")):
+        return False
+    # Image Gen / Video Gen
+    if any(k in mid_clean for k in ("dall-e", "imagen", "flux", "stable-diffusion", "sdxl", "midjourney", "image-generation", "instruct-pix2pix", "upscale", "video")):
         return False
     # Moderation / Safety Guard
-    if any(k in mid_clean for k in ("guard", "shieldgemma", "moderation", "safety-guard", "llama-guard", "wildguard")):
+    if any(k in mid_clean for k in ("guard", "shieldgemma", "moderation", "safety-guard", "llama-guard", "wildguard", "omni-moderation", "text-moderation")):
         return False
     # Rerankers
     if any(k in mid_clean for k in ("rerank", "reranker", "bge-rerank")):
@@ -97,7 +114,7 @@ async def _fetch_models_gemini(api_key: str) -> List[Tuple[str, bool]]:
     await wait_for_provider_pacing("gemini")
     url = "https://generativelanguage.googleapis.com/v1beta/models"
     headers = {"x-goog-api-key": api_key}
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         res = await client.get(url, headers=headers)
         if res.status_code != 200:
             return []
@@ -116,10 +133,12 @@ async def _fetch_models_openai_compatible(
     api_key: Optional[str] = None,
     is_openrouter: bool = False,
     provider_name: str = "",
+    allowlist: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[str], Dict[str, bool]]:
     """
     Fetch chat-capable model IDs from OpenAI-compatible /models endpoint.
-    Only OpenRouter pricing data determines 'Free' badge. For other providers, missing pricing is not free.
+    Only OpenRouter pricing data determines 'Free' badge directly. For other providers,
+    the free tier allowlist or user confirmation flag is used.
     Returns: (all_chat_model_ids, free_model_ids, is_free_map)
     """
     await wait_for_provider_pacing(provider_name)
@@ -131,7 +150,9 @@ async def _fetch_models_openai_compatible(
         headers["HTTP-Referer"] = "https://github.com/selormtettehabotsi/MoneyBudSaver"
         headers["X-Title"] = "MoneyCouncil"
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    allow_set = allowlist or set()
+
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         res = await client.get(url, headers=headers)
         if res.status_code != 200:
             return [], [], {}
@@ -161,26 +182,29 @@ async def _fetch_models_openai_compatible(
                     else:
                         is_free = False
                 else:
-                    is_free = False
+                    is_free = (mid.lower() in allow_set)
 
                 model_ids.append(mid)
                 is_free_map[mid] = is_free
                 if is_free:
                     free_models.append(mid)
+
             elif isinstance(item, str):
                 if is_chat_capable_model(item, provider_name=provider_name):
                     model_ids.append(item)
-                    is_free_map[item] = False
+                    is_free = (item.lower() in allow_set)
+                    is_free_map[item] = is_free
+                    if is_free:
+                        free_models.append(item)
 
-        free_models.sort()
-        return model_ids, free_models, is_free_map
+        return model_ids, sorted(free_models), is_free_map
 
 
 async def _fetch_models_ollama(base_url: str) -> List[str]:
     """Fetch model IDs from Ollama (100% local/private)."""
     await wait_for_provider_pacing("ollama")
     url = f"{base_url.rstrip('/')}/api/tags"
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
         res = await client.get(url)
         if res.status_code != 200:
             return []
@@ -209,6 +233,57 @@ def _get_tester_db_session():
     return SessionLocal()
 
 
+def rank_model_candidates(
+    candidates: List[str],
+    provider_name: str,
+    recommended_ids: List[str],
+    other_active_families: Optional[Set[str]] = None,
+) -> List[str]:
+    """
+    Ranks candidate models according to strict non-alphabetical criteria:
+    1. In recommended list (ranked by sort order)
+    2. Family not already used by other voters (increases council diversity)
+    3. Larger instruct or chat models (70b, 72b, 120b, flash, etc.)
+    4. Recent release / version numbers (e.g. 3.3 > 3.1, 2.5 > 1.5, glm-5.3, etc.)
+    
+    NEVER ranks alphabetically.
+    """
+    other_fams = other_active_families or set()
+    rec_lower_list = [r.lower().strip() for r in recommended_ids]
+
+    def candidate_score(mid: str) -> float:
+        score = 0.0
+        m_lower = mid.lower().strip()
+
+        # 1. Recommended list priority
+        if m_lower in rec_lower_list:
+            rec_idx = rec_lower_list.index(m_lower)
+            score += 1000.0 - (rec_idx * 10.0)
+
+        # 2. Family diversity bonus
+        fam = derive_model_family(mid, provider_name)
+        if fam and fam not in other_fams:
+            score += 200.0
+
+        # 3. Model capacity / parameter size
+        if any(s in m_lower for s in ("120b", "405b", "72b", "70b", "32b", "27b")):
+            score += 100.0
+        elif any(s in m_lower for s in ("flash", "instruct", "chat")):
+            score += 50.0
+        elif any(s in m_lower for s in ("8b", "9b", "7b", "3b")):
+            score += 25.0
+
+        # 4. Modern version bonus
+        if any(v in m_lower for v in ("3.3", "3.8", "3.5", "2.5", "5.3", "r1", "k3", "v3", "qwq")):
+            score += 40.0
+        elif any(v in m_lower for v in ("3.1", "3.0", "2.0", "1.5")):
+            score += 20.0
+
+        return score
+
+    return sorted(candidates, key=candidate_score, reverse=True)
+
+
 async def verify_provider_connectivity(
     provider_name: str,
     model_id: Optional[str] = None,
@@ -217,68 +292,90 @@ async def verify_provider_connectivity(
 ) -> TestConnectionResponse:
     """
     Tests a single provider's connection with configured timeouts, streaming TTFT,
-    rate pacing across call types, concurrent 45s NVIDIA probes, pricing badges, and median TTFT tracking.
+    rate pacing across call types, concurrent 90s NVIDIA probes, pricing badges, and median TTFT tracking.
     """
-    custom_models = (user_settings or {}).get("custom_model_ids", {})
-    custom_timeouts = (user_settings or {}).get("custom_timeouts", {})
-    provider_name_lower = provider_name.lower().strip()
+    p_name_lower = provider_name.lower().strip()
 
-    # Determine provider-specific timeout (NVIDIA 90s, others 25s, or custom)
-    if provider_name_lower in ("nvidia", "nvidia_kimi"):
-        default_timeout = settings.NVIDIA_PROVIDER_TIMEOUT_SECONDS
-    else:
-        default_timeout = settings.AI_PROVIDER_DEFAULT_TIMEOUT_SECONDS
-    eff_timeout = int(custom_timeouts.get(provider_name_lower, default_timeout))
+    # Map legacy keys to slot keys
+    p_key = p_name_lower
+    if p_key == "groq":
+        p_key = "groq_1"
+    elif p_key == "openrouter":
+        p_key = "openrouter_1"
+    elif p_key == "nvidia":
+        p_key = "nvidia_2"
+    elif p_key == "nvidia_kimi":
+        p_key = "nvidia_1"
+
+    # Resolve settings from DB/Env/Defaults
+    db_session = db or _get_tester_db_session()
+    resolved_cfg = get_resolved_provider_config(p_key, db=db_session, user_settings=user_settings)
+
+    eff_timeout = int(resolved_cfg["timeout"])
+    if p_key in ("nvidia_1", "nvidia_2", "nvidia", "nvidia_kimi"):
+        eff_timeout = max(eff_timeout, 90)
+
+    resolved_model_id = (model_id or resolved_cfg["model_id"] or "").strip()
 
     # Resolve provider credentials & endpoints
     api_key: Optional[str] = None
-    resolved_model_id: str = (model_id or "").strip()
     base_url: Optional[str] = None
     is_gemini = False
     is_ollama = False
     is_openrouter = False
+    is_nvidia = p_key in ("nvidia_1", "nvidia_2", "nvidia", "nvidia_kimi")
+    is_custom = p_key in ("custom_1", "custom_2")
 
-    if provider_name_lower == "gemini":
+    if p_key == "gemini":
         is_gemini = True
         api_key = settings.GEMINI_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("gemini", settings.GEMINI_MODEL_ID)
-    elif provider_name_lower == "groq":
+
+    elif p_key in ("groq_1", "groq_2"):
         base_url = "https://api.groq.com/openai/v1"
         api_key = settings.GROQ_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("groq", settings.GROQ_MODEL_ID)
-    elif provider_name_lower == "mistral":
-        base_url = "https://api.mistral.ai/v1"
-        api_key = settings.MISTRAL_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("mistral", settings.MISTRAL_MODEL_ID)
-    elif provider_name_lower == "openrouter":
+
+    elif p_key in ("openrouter_1", "openrouter_2"):
         is_openrouter = True
         base_url = "https://openrouter.ai/api/v1"
         api_key = settings.OPENROUTER_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("openrouter", settings.OPENROUTER_MODEL_ID)
-    elif provider_name_lower == "nvidia":
+
+    elif p_key in ("nvidia_1", "nvidia_2"):
         base_url = "https://integrate.api.nvidia.com/v1"
         api_key = settings.NVIDIA_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("nvidia", settings.NVIDIA_MODEL_ID)
-    elif provider_name_lower == "nvidia_kimi":
-        base_url = "https://integrate.api.nvidia.com/v1"
-        api_key = settings.NVIDIA_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("nvidia_kimi", settings.NVIDIA_KIMI_MODEL_ID or "moonshotai/kimi-k3")
-    elif provider_name_lower == "cerebras":
-        base_url = "https://api.cerebras.ai/v1"
-        api_key = settings.CEREBRAS_API_KEY
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("cerebras", settings.CEREBRAS_MODEL_ID)
-    elif provider_name_lower == "ollama":
+
+    elif is_custom:
+        base_url = resolved_cfg.get("base_url")
+        env_key_name = resolved_cfg.get("env_key_name") or ""
+        if env_key_name:
+            api_key = os.environ.get(env_key_name, "")
+        if not base_url:
+            return TestConnectionResponse(
+                provider_name=provider_name,
+                model_id=resolved_model_id or "unknown",
+                http_status=400,
+                latency_ms=0,
+                status="error",
+                diagnosis="Custom provider missing Base URL.",
+                catalog_ok=False,
+                chat_status="error",
+            )
+        is_valid_url, url_err = validate_custom_endpoint_url(base_url)
+        if not is_valid_url:
+            return TestConnectionResponse(
+                provider_name=provider_name,
+                model_id=resolved_model_id or "unknown",
+                http_status=400,
+                latency_ms=0,
+                status="error",
+                diagnosis=f"SSRF Protection Error: {url_err}",
+                catalog_ok=False,
+                chat_status="error",
+            )
+
+    elif p_key == "ollama":
         is_ollama = True
         base_url = f"{settings.OLLAMA_BASE_URL}"
-        if not resolved_model_id:
-            resolved_model_id = custom_models.get("ollama", settings.OLLAMA_MODEL_ID)
+
     else:
         return TestConnectionResponse(
             provider_name=provider_name,
@@ -299,7 +396,7 @@ async def verify_provider_connectivity(
             http_status=None,
             latency_ms=0,
             status="invalid_key",
-            diagnosis="API Key is not configured in server environment or settings.",
+            diagnosis="API Key is not configured in server environment.",
             catalog_ok=False,
             chat_status="invalid_key",
             model_found_in_list=None,
@@ -315,7 +412,7 @@ async def verify_provider_connectivity(
             http_status=None,
             latency_ms=0,
             status="model_not_found",
-            diagnosis="Model ID is not configured.",
+            diagnosis="Model ID is not configured (choose a model).",
             catalog_ok=False,
             chat_status="model_not_found",
             model_found_in_list=None,
@@ -325,10 +422,17 @@ async def verify_provider_connectivity(
 
     # Check DB for parameter fallback
     try:
-        db_sess = db or _get_tester_db_session()
-        db_thinking_supp = get_thinking_support_db(db_sess, provider_name_lower, resolved_model_id)
+        db_thinking_supp = get_thinking_support_db(db_session, p_key, resolved_model_id)
         if db_thinking_supp is False:
-            _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
+            _UNSUPPORTED_THINKING_PROVIDERS.add(p_key)
+    except Exception:
+        pass
+
+    # Load free tier allowlist from DB
+    allowlist_models: Set[str] = set()
+    try:
+        raw_allow = db_session.query(FreeTierAllowlist).all()
+        allowlist_models = {r.model_id.lower().strip() for r in raw_allow}
     except Exception:
         pass
 
@@ -341,25 +445,30 @@ async def verify_provider_connectivity(
         if is_gemini:
             g_models = await _fetch_models_gemini(api_key)
             available_models = [m[0] for m in g_models]
-            is_free_map = {m[0]: m[1] for m in g_models}
-            free_models_list = []
+            for m in available_models:
+                is_free_map[m] = (m.lower() in allowlist_models)
+                if is_free_map[m]:
+                    free_models_list.append(m)
         elif is_ollama:
             available_models = await _fetch_models_ollama(base_url)
-            is_free_map = {m: False for m in available_models}
-            free_models_list = []
+            is_free_map = {m: True for m in available_models}
+            free_models_list = list(available_models)
         elif base_url:
             available_models, free_models_list, is_free_map = await _fetch_models_openai_compatible(
-                base_url, api_key, is_openrouter=is_openrouter, provider_name=provider_name_lower
+                base_url, api_key, is_openrouter=is_openrouter, provider_name=p_key, allowlist=allowlist_models
             )
     except Exception:
         pass
 
-    # Free label rule: Only OpenRouter publishes prices.
+    # Catalog Label
     if is_openrouter:
         available_models_label = "Free models on OpenRouter"
+    elif is_custom:
+        available_models_label = "Models available on custom endpoint (Warning: free eligibility unverified)"
     else:
         available_models_label = "Models available to your key (free-tier eligibility not published by this provider)"
 
+    # Check model presence in catalog
     model_found_in_list: Optional[bool] = None
     close_matches: List[str] = []
 
@@ -378,15 +487,12 @@ async def verify_provider_connectivity(
                 cutoff=0.25,
             )
             if is_openrouter:
-                close_matches = [
-                    f"{m} [Free]" if is_free_map.get(m, False) or ":free" in m else m
-                    for m in raw_matches
-                ]
+                close_matches = [f"{m} [Free]" if is_free_map.get(m) else f"{m} [Paid]" for m in raw_matches]
             else:
                 close_matches = list(raw_matches)
 
     # 2. Rate pacing wait between catalog call and chat probe
-    await wait_for_provider_pacing(provider_name_lower)
+    await wait_for_provider_pacing(p_key)
 
     # 3. Execute Chat Probes
     start_time = time.perf_counter()
@@ -398,13 +504,7 @@ async def verify_provider_connectivity(
     chat_status = "ok"
     alternative_models: List[str] = []
 
-    is_nvidia = provider_name_lower in ("nvidia", "nvidia_kimi")
-
     async def run_single_probe(include_extras: bool, timeout_sec: float) -> Tuple[int, Optional[int], Optional[str], Optional[int], str]:
-        """
-        Executes a test probe with TTFT measurement.
-        Returns: (http_status, ttft_ms, error_text_or_json, retry_after_sec, probe_status)
-        """
         p_start = time.perf_counter()
         p_ttft: Optional[int] = None
 
@@ -418,7 +518,7 @@ async def verify_provider_connectivity(
                 "response_mime_type": "application/json",
                 "maxOutputTokens": 256,
             }
-            if include_extras and provider_name_lower not in _UNSUPPORTED_THINKING_PROVIDERS:
+            if include_extras and p_key not in _UNSUPPORTED_THINKING_PROVIDERS:
                 thinking_cfg = get_gemini_thinking_config(resolved_model_id)
                 if thinking_cfg:
                     gen_cfg["thinkingConfig"] = thinking_cfg
@@ -428,7 +528,7 @@ async def verify_provider_connectivity(
                 "contents": [{"role": "user", "parts": [{"text": TEST_PING_PROMPT}]}],
                 "generationConfig": gen_cfg,
             }
-            async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=False) as client:
                 res = await client.post(url, headers=headers, json=payload)
                 p_ttft = int((time.perf_counter() - p_start) * 1000)
                 r_after = parse_retry_after(res.headers.get("Retry-After")) if res.status_code == 429 else None
@@ -453,14 +553,14 @@ async def verify_provider_connectivity(
                 "max_tokens": 256,
             }
 
-            if include_extras and provider_name_lower not in _UNSUPPORTED_THINKING_PROVIDERS:
+            if include_extras and p_key not in _UNSUPPORTED_THINKING_PROVIDERS:
                 if is_openrouter:
                     payload["reasoning"] = {"effort": "low"}
                 elif is_nvidia:
                     payload["chat_template_kwargs"] = {"clear_thinking": True, "enable_thinking": False}
                     payload["reasoning_effort"] = "low"
 
-            async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=False) as client:
                 res = await client.post(endpoint, json=payload, headers=headers)
                 p_ttft = int((time.perf_counter() - p_start) * 1000)
                 r_after = parse_retry_after(res.headers.get("Retry-After")) if res.status_code == 429 else None
@@ -468,8 +568,8 @@ async def verify_provider_connectivity(
 
     try:
         if is_nvidia:
-            # NVIDIA: Cap diagnostic probes at 45s and run Probe 1 & Probe 2 concurrently
-            nvidia_probe_timeout = 45.0
+            # NVIDIA: Cap diagnostic probes at 90s and run Probe 1 & Probe 2 concurrently
+            nvidia_probe_timeout = 90.0
             p1_task = run_single_probe(include_extras=True, timeout_sec=nvidia_probe_timeout)
             p2_task = run_single_probe(include_extras=False, timeout_sec=nvidia_probe_timeout)
             results = await asyncio.gather(p1_task, p2_task, return_exceptions=True)
@@ -491,15 +591,13 @@ async def verify_provider_connectivity(
                 resp_text = res2[2]
                 test_status = "success"
                 chat_status = "ok"
-                diagnosis = "Parameter probe timed out, clean probe succeeded: thinking parameters caused hang (thinking control not supported)."
-                _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
+                diagnosis = "Clean probe succeeded: thinking control not supported (thinking parameters caused hang)."
+                _UNSUPPORTED_THINKING_PROVIDERS.add(p_key)
                 try:
-                    db_sess = db or _get_tester_db_session()
-                    record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
+                    record_thinking_support_db(db_session, p_key, resolved_model_id, supported=False)
                 except Exception:
                     pass
             else:
-                # Both probes failed
                 probe_status = None
                 probe_resp_text = ""
                 probe_retry_after = None
@@ -520,6 +618,11 @@ async def verify_provider_connectivity(
                     test_status = "model_not_found"
                     chat_status = "model_not_found"
                     diagnosis = f"Model ID '{resolved_model_id}' not found by provider (HTTP 404)."
+                elif probe_status in (402, 429) and any(q in (probe_resp_text or "").lower() for q in ("insufficient", "quota", "credit", "balance", "billable")):
+                    http_status = probe_status
+                    test_status = "rate_limited"
+                    chat_status = "rate_limited"
+                    diagnosis = "not free, disabled: Free quota exhausted or billing required."
                 elif probe_status == 429:
                     http_status = 429
                     test_status = "rate_limited"
@@ -531,15 +634,10 @@ async def verify_provider_connectivity(
                     test_status = "timeout"
                     chat_status = "timeout"
                     http_status = probe_status if probe_status else 504
-                    diagnosis = "NVIDIA NIM timed out on both parameter and clean probes (capped at 45s): provider-side capacity issue."
-                    alt_models = [m for m in available_models if m.lower() != resolved_model_id.lower()][:3]
-                    alternative_models = alt_models
-                    if alt_models:
-                        diagnosis += f" Suggested alternatives: {', '.join(alt_models)}"
+                    diagnosis = "NVIDIA NIM timed out on both parameter and clean probes (capped at 90s): provider-side capacity issue."
                     resp_text = probe_resp_text
 
         else:
-            # Standard single probe with parameter fallback
             h_status, probe_ttft, resp_text, r_after, p_status = await run_single_probe(
                 include_extras=True, timeout_sec=float(eff_timeout)
             )
@@ -567,10 +665,9 @@ async def verify_provider_connectivity(
                     is_unsupp = True
 
                 if is_unsupp:
-                    _UNSUPPORTED_THINKING_PROVIDERS.add(provider_name_lower)
+                    _UNSUPPORTED_THINKING_PROVIDERS.add(p_key)
                     try:
-                        with SessionLocal() as db_sess:
-                            record_thinking_support_db(db_sess, provider_name_lower, resolved_model_id, supported=False)
+                        record_thinking_support_db(db_session, p_key, resolved_model_id, supported=False)
                     except Exception:
                         pass
 
@@ -595,6 +692,10 @@ async def verify_provider_connectivity(
                 test_status = "model_not_found"
                 chat_status = "model_not_found"
                 diagnosis = f"Model ID '{resolved_model_id}' not found by provider (HTTP 404)."
+            elif http_status in (402, 429) and any(q in (resp_text or "").lower() for q in ("insufficient", "quota", "credit", "balance", "billable")):
+                test_status = "rate_limited"
+                chat_status = "rate_limited"
+                diagnosis = "not free, disabled: Free quota exhausted or billing required."
             elif http_status == 429:
                 test_status = "rate_limited"
                 chat_status = "rate_limited"
@@ -651,28 +752,25 @@ async def verify_provider_connectivity(
         if "privacy settings" not in diagnosis:
             diagnosis += f" {privacy_hint}"
 
-    # Determine is_free status (only OpenRouter publishes pricing)
-    is_free_val = is_free_map.get(resolved_model_id, False) if is_openrouter else False
+    # Determine is_free status
+    is_free_val = is_free_map.get(resolved_model_id, False) if is_openrouter else (resolved_model_id.lower() in allowlist_models or resolved_cfg.get("confirmed_free", False))
 
     # Record TTFT sample in DB
     if ttft_ms is not None and ttft_ms > 0:
         try:
-            db_sess = db or _get_tester_db_session()
-            record_provider_ttft(db_sess, provider_name_lower, ttft_ms)
+            record_provider_ttft(db_session, p_key, ttft_ms)
         except Exception:
             pass
 
     # Retrieve rolling median TTFT
     median_ttft: Optional[int] = None
     try:
-        db_sess = db or _get_tester_db_session()
-        median_ttft = get_provider_median_ttft(db_sess, provider_name_lower)
+        median_ttft = get_provider_median_ttft(db_session, p_key)
     except Exception:
         pass
 
     # Record in Circuit Breaker database
     try:
-        db_sess = db or _get_tester_db_session()
         res_dict = {
             "status": test_status,
             "http_status": http_status,
@@ -680,11 +778,26 @@ async def verify_provider_connectivity(
             "diagnosis": diagnosis,
         }
         if test_status == "success":
-            record_provider_success(db_sess, provider_name_lower, res_dict)
+            record_provider_success(db_session, p_key, res_dict)
         else:
-            record_provider_test_result(db_sess, provider_name_lower, res_dict)
+            record_provider_test_result(db_session, p_key, res_dict)
     except Exception:
         pass
+
+    # Build Alternative suggestions if failed or requested
+    if available_models and test_status != "success":
+        recs: List[str] = []
+        try:
+            db_recs = db_session.query(RecommendedModel).filter(RecommendedModel.provider_name == p_key).order_by(RecommendedModel.sort_order.asc()).all()
+            recs = [r.model_id for r in db_recs]
+        except Exception:
+            pass
+        ranked_alts = rank_model_candidates(
+            [m for m in available_models if m.lower() != resolved_model_id.lower()],
+            provider_name=p_key,
+            recommended_ids=recs,
+        )
+        alternative_models = ranked_alts[:4]
 
     return TestConnectionResponse(
         provider_name=provider_name,
@@ -707,3 +820,327 @@ async def verify_provider_connectivity(
         available_models_count=len(available_models),
         close_matches=close_matches,
     )
+
+
+async def find_working_candidates_for_provider(
+    provider_name: str,
+    db: Session,
+    user_settings: Optional[Dict[str, Any]] = None,
+) -> List[FindWorkingModelCandidateResult]:
+    """
+    Sequentially probes candidates for a provider:
+    1. Resolves recommended patterns against live catalog first (newest/largest first)
+    2. Then tests top ranked candidates from live catalog
+    Paced, non-alphabetical ranking, returns test results list for user to tap 'Apply'.
+    """
+    p_key = provider_name.lower().strip()
+    if p_key == "groq":
+        p_key = "groq_1"
+    elif p_key == "openrouter":
+        p_key = "openrouter_1"
+    elif p_key == "nvidia":
+        p_key = "nvidia_2"
+    elif p_key == "nvidia_kimi":
+        p_key = "nvidia_1"
+
+    # 1. Fetch recommended patterns
+    patterns = get_patterns_for_provider(p_key, db=db)
+
+    # 2. Probe catalog to discover candidate models
+    test_res = await verify_provider_connectivity(provider_name=p_key, db=db, user_settings=user_settings)
+    all_catalog = test_res.free_models if test_res.free_models else (test_res.close_matches or [])
+
+    # 3. Resolve patterns against live catalog
+    resolved_records = resolve_provider_recommended_patterns(
+        provider_name=p_key,
+        patterns=patterns,
+        catalog_models=all_catalog,
+        is_free_map=None,
+    )
+    rec_resolved_ids = [r["resolved_model_id"] for r in resolved_records if r["resolved_model_id"]]
+    if not rec_resolved_ids:
+        for pat in patterns:
+            if "*" not in pat and "?" not in pat and pat not in rec_resolved_ids:
+                rec_resolved_ids.append(pat)
+
+    # 4. Form candidate list (resolved recommended first, then ranked catalog)
+    candidate_set: Set[str] = set()
+    candidate_list: List[str] = []
+
+    for r_id in rec_resolved_ids:
+        if r_id not in candidate_set:
+            candidate_set.add(r_id)
+            candidate_list.append(r_id)
+
+    ranked_catalog = rank_model_candidates(
+        candidates=[m for m in all_catalog if m not in candidate_set],
+        provider_name=p_key,
+        recommended_ids=rec_resolved_ids,
+    )
+
+    for m_id in ranked_catalog:
+        if len(candidate_list) >= 6:
+            break
+        if m_id not in candidate_set:
+            candidate_set.add(m_id)
+            candidate_list.append(m_id)
+
+    results: List[FindWorkingModelCandidateResult] = []
+
+    for cand_id in candidate_list[:5]:
+        await wait_for_provider_pacing(p_key)
+        probe_res = await verify_provider_connectivity(
+            provider_name=p_key,
+            model_id=cand_id,
+            user_settings=user_settings,
+            db=db,
+        )
+        passed = (probe_res.status == "success")
+        fam = derive_model_family(cand_id, p_key)
+        is_rec = (cand_id in rec_resolved_ids or cand_id in patterns)
+
+        results.append(
+            FindWorkingModelCandidateResult(
+                model_id=cand_id,
+                provider_name=p_key,
+                model_family=fam,
+                is_recommended=is_rec,
+                is_free=bool(probe_res.is_free),
+                status="passed" if passed else "failed",
+                http_status=probe_res.http_status,
+                latency_ms=probe_res.latency_ms,
+                ttft_ms=probe_res.ttft_ms,
+                diagnosis=probe_res.diagnosis,
+            )
+        )
+
+        # Space out probe calls
+        await asyncio.sleep(0.5)
+
+    return results
+
+
+async def use_recommended_for_provider(
+    provider_name: str,
+    db: Session,
+    user_settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, Optional[str], List[FindWorkingModelCandidateResult], str]:
+    """
+    One-tap flow: resolves recommended patterns against live catalog at runtime,
+    tests resolved models in order (newest/largest first), and activates the first one that passes.
+    Returns: (success, applied_model_id, attempts_list, message)
+    """
+    p_key = provider_name.lower().strip()
+    if p_key == "groq":
+        p_key = "groq_1"
+    elif p_key == "openrouter":
+        p_key = "openrouter_1"
+    elif p_key == "nvidia":
+        p_key = "nvidia_2"
+    elif p_key == "nvidia_kimi":
+        p_key = "nvidia_1"
+
+    # 1. Fetch patterns from DB or config
+    patterns = get_patterns_for_provider(p_key, db=db)
+
+    # 2. Probe catalog to resolve patterns against live catalog
+    cat_probe = await verify_provider_connectivity(provider_name=p_key, db=db, user_settings=user_settings)
+    catalog_models = list(cat_probe.free_models if cat_probe.free_models else (cat_probe.close_matches or []))
+    if cat_probe.model_id and cat_probe.model_id not in catalog_models:
+        catalog_models.append(cat_probe.model_id)
+
+    # 3. Resolve patterns
+    resolved_records = resolve_provider_recommended_patterns(
+        provider_name=p_key,
+        patterns=patterns,
+        catalog_models=catalog_models,
+        is_free_map=None,
+    )
+    candidates_to_test = [r["resolved_model_id"] for r in resolved_records if r["resolved_model_id"]]
+
+    # Fallback to literal patterns without wildcards if catalog resolution is empty
+    if not candidates_to_test:
+        for pat in patterns:
+            if "*" not in pat and "?" not in pat and pat not in candidates_to_test:
+                candidates_to_test.append(pat)
+
+    # Fallback to configured model if still empty
+    if not candidates_to_test:
+        cfg = get_resolved_provider_config(p_key, db=db)
+        if cfg["model_id"]:
+            candidates_to_test = [cfg["model_id"]]
+
+    attempts: List[FindWorkingModelCandidateResult] = []
+
+    for r_id in candidates_to_test:
+        await wait_for_provider_pacing(p_key)
+        probe_res = await verify_provider_connectivity(
+            provider_name=p_key,
+            model_id=r_id,
+            user_settings=user_settings,
+            db=db,
+        )
+        is_confirmed_free = bool(probe_res.is_free)
+        passed = (probe_res.status == "success" and is_confirmed_free)
+        fam = derive_model_family(r_id, p_key)
+        diag = probe_res.diagnosis
+        if probe_res.status == "success" and not is_confirmed_free:
+            diag = f"Model '{r_id}' responded with HTTP 200 but is unconfirmed/paid. Free-only enforcement skipped activation."
+
+        attempt_item = FindWorkingModelCandidateResult(
+            model_id=r_id,
+            provider_name=p_key,
+            model_family=fam,
+            is_recommended=True,
+            is_free=is_confirmed_free,
+            status="passed" if passed else "failed",
+            http_status=probe_res.http_status,
+            latency_ms=probe_res.latency_ms,
+            ttft_ms=probe_res.ttft_ms,
+            diagnosis=diag,
+        )
+        attempts.append(attempt_item)
+
+        if passed:
+            # Save into DB provider_settings
+            setting = db.query(ProviderSetting).filter(ProviderSetting.provider_key == p_key).first()
+            if not setting:
+                setting = ProviderSetting(
+                    provider_key=p_key,
+                    model_id=r_id,
+                    family_override=fam,
+                    enabled=True,
+                    timeout=probe_res.median_ttft_ms or 25,
+                    confirmed_free=True,
+                    history=[],
+                )
+                db.add(setting)
+            else:
+                old_mid = setting.model_id
+                if old_mid and old_mid != r_id:
+                    hist = list(setting.history or [])
+                    if old_mid not in hist:
+                        hist.insert(0, old_mid)
+                    setting.history = hist[:5]
+                setting.model_id = r_id
+                setting.family_override = fam
+                setting.confirmed_free = True
+
+            db.commit()
+            return True, r_id, attempts, f"Successfully tested and activated recommended model '{r_id}'."
+
+        await asyncio.sleep(0.5)
+
+    return False, None, attempts, "None of the recommended models passed connection testing."
+
+
+async def fix_all_providers(
+    db: Session,
+    user_settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Goes through every failed or empty voter, tries the recommended list in order,
+    applies working models, and returns a comprehensive summary.
+    """
+    targets = ["gemini", "groq_1", "groq_2", "openrouter_1", "openrouter_2", "nvidia_1", "nvidia_2"]
+    results: List[Dict[str, Any]] = []
+
+    for p in targets:
+        cfg = get_resolved_provider_config(p, db=db, user_settings=user_settings)
+        if not cfg["enabled"]:
+            continue
+
+        # Test current model
+        test_res = await verify_provider_connectivity(provider_name=p, db=db, user_settings=user_settings)
+        if test_res.status == "success":
+            results.append({
+                "provider_key": p,
+                "action": "already_working",
+                "model_id": test_res.model_id,
+                "message": f"Provider '{p}' already connected and working on '{test_res.model_id}'.",
+            })
+            continue
+
+        # Try recommended models
+        succ, applied_id, attempts, msg = await use_recommended_for_provider(
+            provider_name=p,
+            db=db,
+            user_settings=user_settings,
+        )
+
+        if succ and applied_id:
+            results.append({
+                "provider_key": p,
+                "action": "fixed",
+                "old_model_id": test_res.model_id,
+                "new_model_id": applied_id,
+                "message": f"Switched to working recommended model '{applied_id}'.",
+                "attempts": [a.model_dump(mode="json") for a in attempts],
+            })
+        else:
+            results.append({
+                "provider_key": p,
+                "action": "failed",
+                "old_model_id": test_res.model_id,
+                "message": f"Could not fix provider '{p}': {msg}",
+                "attempts": [a.model_dump(mode="json") for a in attempts],
+            })
+
+        await asyncio.sleep(0.5)
+
+    fixed_count = sum(1 for r in results if r["action"] == "fixed")
+    working_count = sum(1 for r in results if r["action"] == "already_working")
+    failed_count = sum(1 for r in results if r["action"] == "failed")
+
+    return {
+        "summary": f"Fix all completed: {fixed_count} fixed, {working_count} already working, {failed_count} failed.",
+        "fixed_count": fixed_count,
+        "working_count": working_count,
+        "failed_count": failed_count,
+        "details": results,
+    }
+
+
+async def auto_switch_provider_model(
+    provider_key: str,
+    db: Session,
+    reason: str = "Model returned 404 not found during deliberation",
+) -> Optional[str]:
+    """
+    If auto-switch setting is enabled in DB, finds the next passing confirmed-free recommended model,
+    activates it, records the change in ModelSwitchLog, and returns the new model ID.
+    """
+    from datetime import datetime, timezone
+    from app.models.council import CouncilAppSetting, ModelSwitchLog
+
+    # Check setting
+    setting = db.query(CouncilAppSetting).filter(CouncilAppSetting.setting_key == "auto_switch_on_missing_model").first()
+    is_enabled = bool(setting.setting_value) if setting is not None else True
+    if not is_enabled:
+        return None
+
+    # Find current model ID
+    p_key = provider_key.lower().strip()
+    curr_setting = db.query(ProviderSetting).filter(ProviderSetting.provider_key == p_key).first()
+    old_model = curr_setting.model_id if curr_setting else ""
+
+    succ, applied_id, attempts, msg = await use_recommended_for_provider(
+        provider_name=p_key,
+        db=db,
+    )
+
+    if succ and applied_id and applied_id != old_model:
+        # Record switch log
+        log_entry = ModelSwitchLog(
+            provider_key=p_key,
+            old_model_id=old_model or "none",
+            new_model_id=applied_id,
+            reason=reason,
+            reverted=False,
+            switched_at=datetime.now(timezone.utc),
+        )
+        db.add(log_entry)
+        db.commit()
+        return applied_id
+
+    return None
