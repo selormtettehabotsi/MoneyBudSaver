@@ -4,13 +4,28 @@ import { categoriesApi } from "../api/categories";
 import { BudgetProgress, Category } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
 import { useSync } from "../context/SyncContext";
+import { useToast } from "../context/ToastContext";
 import { Icon } from "../components/common/Icon";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, ChevronLeft, ChevronRight, FolderPlus, AlertCircle } from "lucide-react";
+import { Button } from "../components/common/Button";
+import { EmptyState } from "../components/common/EmptyState";
+import { MoneyInput } from "../components/common/MoneyInput";
+import { Badge } from "../components/common/Badge";
+import {
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  FolderPlus,
+  PieChart,
+  Calendar,
+} from "lucide-react";
+import { Skeleton } from "../components/common/Skeleton";
 
 export const BudgetsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
   const { loadCachedOrFetch, isOnline } = useSync();
+  const { success: toastSuccess, warning: toastWarning } = useToast();
+
   const today = new Date();
   const [month, setMonth] = useState<number>(today.getMonth() + 1);
   const [year, setYear] = useState<number>(today.getFullYear());
@@ -32,6 +47,23 @@ export const BudgetsPage: React.FC = () => {
   const [categoryIcon, setCategoryIcon] = useState("tag");
 
   const [modalError, setModalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const availableIcons = [
+    "Tag", "Cart", "Home", "Briefcase", "Trending", "Entertainment",
+    "Education", "Savings", "Debt", "Bills", "Coffee", "Utensils",
+    "Car", "Heart", "Zap"
+  ];
+
+  const availableColors = [
+    "#6366f1", "#06b6d4", "#10b981", "#f59e0b", "#f43f5e",
+    "#8b5cf6", "#ec4899", "#14b8a6", "#3b82f6", "#84cc16"
+  ];
 
   const loadData = async () => {
     setLoading(true);
@@ -71,9 +103,41 @@ export const BudgetsPage: React.FC = () => {
     }
   };
 
+  const handleOpenBudgetModal = (categoryIdToEdit?: string, currentLimit?: string) => {
+    if (!isOnline) {
+      toastWarning("Setting budgets requires an active internet connection.");
+      return;
+    }
+    setSelectedCategoryId(categoryIdToEdit || (categories.find(c => c.type === "expense")?.id || ""));
+    setAmountLimit(currentLimit || "");
+    setModalError(null);
+    setIsBudgetModalOpen(true);
+  };
+
+  const handleOpenCategoryModal = () => {
+    if (!isOnline) {
+      toastWarning("Creating categories requires an active internet connection.");
+      return;
+    }
+    setCategoryName("");
+    setCategoryType("expense");
+    setCategoryColor("#6366f1");
+    setCategoryIcon("tag");
+    setModalError(null);
+    setIsCategoryModalOpen(true);
+  };
+
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
+
+    const parsed = parseFloat(amountLimit);
+    if (!parsed || isNaN(parsed) || parsed <= 0) {
+      setModalError("Please enter a valid monthly limit greater than zero.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       await budgetsApi.setLimit({
         category_id: selectedCategoryId,
@@ -82,217 +146,306 @@ export const BudgetsPage: React.FC = () => {
         amount_limit: amountLimit,
       });
       setIsBudgetModalOpen(false);
+      toastSuccess("Budget limit saved.");
       loadData();
     } catch (err: any) {
       setModalError(err.message || "Failed to save budget limit.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
+
+    if (!categoryName.trim()) {
+      setModalError("Category name is required.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       await categoriesApi.create({
-        name: categoryName,
+        name: categoryName.trim(),
         type: categoryType,
         color_hex: categoryColor,
         icon_name: categoryIcon,
       });
       setIsCategoryModalOpen(false);
-      setCategoryName("");
+      toastSuccess(`Category "${categoryName}" created.`);
       loadData();
     } catch (err: any) {
       setModalError(err.message || "Failed to create category.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const monthName = new Date(year, month - 1, 1).toLocaleString("default", { month: "long" });
-
+  // Summaries
   const totalBudgeted = budgets.reduce((acc, b) => acc + parseFloat(b.amount_limit || "0"), 0);
   const totalSpent = budgets.reduce((acc, b) => acc + parseFloat(b.actual_spent || "0"), 0);
-  const overallUsedPct = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0;
+  const totalPercentage = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header & Controls */}
-      <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <h1 style={{ fontSize: "26px" }}>Budgets & Spending Limits</h1>
-          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Control expenses per category and avoid overspending
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {!isOnline && (
-            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
-              <AlertCircle size={12} />
-              <span>Editing offline is disabled</span>
-            </span>
-          )}
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
+      {/* Month Switcher & Actions Strip */}
+      <div
+        className="glass-panel"
+        style={{
+          padding: "16px 20px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "14px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <button
-            className="btn btn-secondary btn-sm"
-            disabled={!isOnline}
-            onClick={() => setIsCategoryModalOpen(true)}
-            title={!isOnline ? "Creating categories requires an active connection" : undefined}
-            style={{ minHeight: "44px" }}
+            type="button"
+            onClick={handlePrevMonth}
+            aria-label="Previous Month"
+            className="btn-icon"
+            style={{ width: "36px", height: "36px", minWidth: "36px", minHeight: "36px" }}
           >
-            <FolderPlus size={16} />
-            <span>New Category</span>
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={!isOnline}
-            onClick={() => {
-              setSelectedCategoryId(categories[0]?.id || "");
-              setAmountLimit("");
-              setModalError(null);
-              setIsBudgetModalOpen(true);
-            }}
-            title={!isOnline ? "Setting budgets requires an active connection" : undefined}
-            style={{ minHeight: "44px" }}
-          >
-            <PlusCircle size={16} />
-            <span>Set Budget Limit</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Month Navigator & Summary Bar */}
-      <div className="glass-panel flex items-center justify-between" style={{ padding: "16px 20px", flexWrap: "wrap", gap: "12px" }}>
-        <div className="flex items-center gap-2">
-          <button className="btn btn-secondary btn-sm btn-icon" onClick={handlePrevMonth} aria-label="Previous Month" style={{ minWidth: "44px", minHeight: "44px" }}>
             <ChevronLeft size={18} />
           </button>
-          <h3 style={{ fontSize: "1.1rem", minWidth: "140px", textAlign: "center", margin: 0 }}>
-            {monthName} {year}
-          </h3>
-          <button className="btn btn-secondary btn-sm btn-icon" onClick={handleNextMonth} aria-label="Next Month" style={{ minWidth: "44px", minHeight: "44px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Calendar size={18} style={{ color: "var(--accent-primary)" }} />
+            <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0, fontFamily: "var(--font-display)" }}>
+              {monthNames[month - 1]} {year}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={handleNextMonth}
+            aria-label="Next Month"
+            className="btn-icon"
+            style={{ width: "36px", height: "36px", minWidth: "36px", minHeight: "36px" }}
+          >
             <ChevronRight size={18} />
           </button>
         </div>
 
-        <div className="flex items-center gap-4 tabular-nums" style={{ fontSize: "0.8125rem", flexWrap: "wrap" }}>
-          <div>
-            <span style={{ color: "var(--text-muted)" }}>Budgeted: </span>
-            <strong style={{ color: "var(--text-primary)" }}>{formatMoney(totalBudgeted)}</strong>
-          </div>
-          <div>
-            <span style={{ color: "var(--text-muted)" }}>Spent: </span>
-            <strong style={{ color: totalSpent > totalBudgeted ? "var(--danger)" : "var(--text-primary)" }}>
-              {formatMoney(totalSpent)}
-            </strong>
-          </div>
-          <div>
-            <span style={{ color: "var(--text-muted)" }}>Total Used: </span>
-            <strong style={{ color: overallUsedPct > 100 ? "var(--danger)" : "var(--success)" }}>
-              {overallUsedPct.toFixed(0)}%
-            </strong>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleOpenCategoryModal}
+            icon={<FolderPlus size={15} />}
+            disabled={!isOnline}
+            title={!isOnline ? "Network required" : undefined}
+          >
+            New Category
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => handleOpenBudgetModal()}
+            icon={<Plus size={15} />}
+            disabled={!isOnline}
+            title={!isOnline ? "Network required" : undefined}
+          >
+            Set Budget Limit
+          </Button>
         </div>
       </div>
 
-      {/* Budgets Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {loading ? (
-          <div style={{ gridColumn: "1 / -1", padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Loading monthly budgets...
+      {/* Overall Month Spending Summary Bar */}
+      {budgets.length > 0 && (
+        <div
+          className="glass-panel"
+          style={{
+            padding: "16px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+            <div style={{ display: "flex", gap: "16px", alignItems: "baseline" }}>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-secondary)" }}>
+                Total Budgeted: <strong className="tabular-nums" style={{ color: "var(--text-primary)" }}>{formatMoney(totalBudgeted)}</strong>
+              </span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-secondary)" }}>
+                Total Spent: <strong className="tabular-nums" style={{ color: totalPercentage > 100 ? "var(--danger)" : "var(--text-primary)" }}>{formatMoney(totalSpent)}</strong>
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Badge
+                variant={totalPercentage > 100 ? "danger" : totalPercentage >= 80 ? "warning" : "success"}
+                size="sm"
+              >
+                {totalPercentage.toFixed(0)}% Utilized
+              </Badge>
+              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                {totalBudgeted >= totalSpent
+                  ? `${formatMoney(totalBudgeted - totalSpent)} remaining`
+                  : `${formatMoney(totalSpent - totalBudgeted)} over budget`}
+              </span>
+            </div>
           </div>
-        ) : budgets.length === 0 ? (
-          <div
-            className="glass-panel"
-            style={{
-              gridColumn: "1 / -1",
-              padding: "48px 24px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-            }}
-          >
-            No category budgets set for {monthName} {year}. Click "Set Budget Limit" to add one.
+
+          <div className="progress-bar-bg" style={{ height: "8px" }}>
+            <div
+              className="progress-bar-fill"
+              style={{
+                width: `${Math.min(100, totalPercentage)}%`,
+                background:
+                  totalPercentage > 100
+                    ? "var(--danger)"
+                    : totalPercentage >= 80
+                    ? "var(--warning)"
+                    : "var(--accent-primary)",
+              }}
+            />
           </div>
-        ) : (
-          budgets.map((b) => {
-            const isOver = b.is_over_budget;
+        </div>
+      )}
+
+      {/* Budget Cards Grid */}
+      {loading && budgets.length === 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          <Skeleton height="180px" borderRadius="var(--radius-lg)" />
+          <Skeleton height="180px" borderRadius="var(--radius-lg)" />
+        </div>
+      ) : budgets.length === 0 ? (
+        <EmptyState
+          icon={<PieChart size={28} />}
+          title={`No budgets set for ${monthNames[month - 1]} ${year}`}
+          description="Establish monthly spending thresholds for your expenses to track burn and maintain financial discipline."
+          actionLabel="Set Budget Limit"
+          onAction={() => handleOpenBudgetModal()}
+          secondaryActionLabel="Create Category"
+          onSecondaryAction={handleOpenCategoryModal}
+        />
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          {budgets.map((b) => {
+            const spentNum = parseFloat(b.actual_spent || "0");
+            const limitNum = parseFloat(b.amount_limit || "0");
+            const pct = limitNum > 0 ? (spentNum / limitNum) * 100 : 0;
+            const remaining = limitNum - spentNum;
+            const isOver = pct > 100;
+            const isNear = pct >= 80 && !isOver;
+
             return (
               <div
-                key={b.id}
-                className="glass-panel flex flex-col justify-between"
+                key={b.category_id}
+                className="glass-panel"
                 style={{
                   padding: "18px 20px",
-                  borderColor: isOver ? "var(--danger-border)" : "var(--border-color)",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: "14px",
+                  borderColor: isOver ? "var(--danger-border)" : isNear ? "var(--warning-border)" : "var(--border-color)",
                 }}
               >
                 <div>
-                  {/* Category info */}
-                  <div className="flex items-center justify-between" style={{ marginBottom: "12px" }}>
-                    <div className="flex items-center gap-3">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <div
                         style={{
-                          width: "34px",
-                          height: "34px",
-                          borderRadius: "8px",
-                          background: `${b.category_color}25`,
-                          color: b.category_color,
+                          width: "36px",
+                          height: "36px",
+                          borderRadius: "10px",
+                          background: `${b.category_color || "#6366f1"}22`,
+                          color: b.category_color || "#6366f1",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
                         }}
                       >
-                        <Icon name={b.category_icon} size={18} color={b.category_color} />
+                        <Icon name={b.category_icon || "Tag"} size={18} color={b.category_color} />
                       </div>
-                      <span style={{ fontWeight: 700, fontSize: "15px", color: "var(--text-primary)" }}>
-                        {b.category_name}
-                      </span>
+                      <div>
+                        <h4 style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)" }}>
+                          {b.category_name}
+                        </h4>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                          {isOver ? "Limit Exceeded" : `${formatMoney(Math.max(0, remaining))} left`}
+                        </span>
+                      </div>
                     </div>
 
-                    <span className={`badge ${isOver ? "badge-danger" : "badge-success"}`}>
-                      {isOver ? "Over Budget" : `${b.percentage_used.toFixed(0)}% Used`}
+                    <Badge
+                      variant={isOver ? "danger" : isNear ? "warning" : "success"}
+                      size="sm"
+                    >
+                      {pct.toFixed(0)}% Used
+                    </Badge>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+                    <span className="tabular-nums" style={{ fontSize: "18px", fontWeight: 700, color: isOver ? "var(--danger)" : "var(--text-primary)" }}>
+                      {formatMoney(spentNum)}
+                    </span>
+                    <span className="tabular-nums" style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                      of {formatMoney(limitNum)}
                     </span>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="progress-bar-bg" style={{ height: "10px", margin: "12px 0 10px 0" }}>
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
                     <div
                       className="progress-bar-fill"
                       style={{
-                        width: `${Math.min(100, b.percentage_used)}%`,
-                        background: isOver ? "var(--danger)" : b.category_color,
+                        width: `${Math.min(100, Math.max(1, pct))}%`,
+                        background: isOver
+                          ? "var(--danger)"
+                          : isNear
+                          ? "var(--warning)"
+                          : b.category_color || "var(--accent-primary)",
                       }}
                     />
                   </div>
                 </div>
 
-                {/* Numbers */}
-                <div className="flex items-center justify-between" style={{ fontSize: "13px", marginTop: "8px" }}>
-                  <div>
-                    <span style={{ color: "var(--text-muted)" }}>Spent: </span>
-                    <strong style={{ color: isOver ? "var(--danger)" : "var(--text-primary)" }}>
-                      {formatMoney(b.actual_spent)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ color: "var(--text-muted)" }}>Limit: </span>
-                    <strong>{formatMoney(b.amount_limit)}</strong>
-                  </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleOpenBudgetModal(b.category_id, b.amount_limit)}
+                    disabled={!isOnline}
+                  >
+                    Adjust Limit
+                  </Button>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
-      {/* Set Budget Modal */}
+      {/* Set Budget Limit Modal */}
       <Modal
         isOpen={isBudgetModalOpen}
         onClose={() => setIsBudgetModalOpen(false)}
-        title={`Set Budget for ${monthName} ${year}`}
+        title={`Set Budget Limit · ${monthNames[month - 1]} ${year}`}
       >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSaveBudget} className="flex flex-col gap-4">
+        <form onSubmit={handleSaveBudget} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
+
           <div className="input-group">
             <label className="input-label">Expense Category</label>
             <select
@@ -311,47 +464,49 @@ export const BudgetsPage: React.FC = () => {
             </select>
           </div>
 
-          <div className="input-group">
-            <label className="input-label">Monthly Limit Amount</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              required
-              placeholder="0.00"
-              className="input-field"
-              value={amountLimit}
-              onChange={(e) => setAmountLimit(e.target.value)}
-            />
-          </div>
+          <MoneyInput
+            label="Monthly Limit Amount"
+            value={amountLimit}
+            onChange={(val) => setAmountLimit(val)}
+            placeholder="500.00"
+            required
+            autoFocus
+          />
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }}>
-            Save Budget Limit
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsBudgetModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={submitting}>
+              Save Budget Limit
+            </Button>
+          </div>
         </form>
       </Modal>
 
-      {/* Create Custom Category Modal */}
+      {/* New Category Modal */}
       <Modal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
         title="Create New Category"
       >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSaveCategory} className="flex flex-col gap-4">
+        <form onSubmit={handleSaveCategory} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
+
           <div className="input-group">
             <label className="input-label">Category Name</label>
             <input
               type="text"
-              required
-              placeholder="e.g. Subscriptions & Software"
               className="input-field"
+              placeholder="e.g. Subscriptions & Software, Cloud Hosting"
               value={categoryName}
               onChange={(e) => setCategoryName(e.target.value)}
+              required
+              autoFocus
             />
           </div>
 
@@ -360,49 +515,79 @@ export const BudgetsPage: React.FC = () => {
             <select
               className="input-field"
               value={categoryType}
-              onChange={(e) => setCategoryType(e.target.value as any)}
+              onChange={(e) => setCategoryType(e.target.value as "income" | "expense")}
             >
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
+              <option value="expense">Expense Category</option>
+              <option value="income">Income Category</option>
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="input-group">
-              <label className="input-label">Color</label>
-              <input
-                type="color"
-                className="input-field"
-                style={{ padding: "4px", height: "42px", cursor: "pointer" }}
-                value={categoryColor}
-                onChange={(e) => setCategoryColor(e.target.value)}
-              />
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Icon Name</label>
-              <select
-                className="input-field"
-                value={categoryIcon}
-                onChange={(e) => setCategoryIcon(e.target.value)}
-              >
-                <option value="tag">Tag</option>
-                <option value="shopping-cart">Cart</option>
-                <option value="home">Home</option>
-                <option value="briefcase">Briefcase</option>
-                <option value="trending-up">Trending</option>
-                <option value="film">Entertainment</option>
-                <option value="book-open">Education</option>
-                <option value="shield">Savings</option>
-                <option value="credit-card">Debt</option>
-                <option value="zap">Bills</option>
-              </select>
+          {/* Color Swatches */}
+          <div className="input-group">
+            <label className="input-label">Color Theme</label>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", padding: "4px 0" }}>
+              {availableColors.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setCategoryColor(color)}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    background: color,
+                    border: categoryColor === color ? "3px solid #ffffff" : "1px solid transparent",
+                    boxShadow: categoryColor === color ? "0 0 8px rgba(0,0,0,0.4)" : "none",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                />
+              ))}
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }}>
-            Create Category
-          </button>
+          {/* Icon Picker */}
+          <div className="input-group">
+            <label className="input-label">Category Icon</label>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(5, 1fr)",
+                gap: "8px",
+                maxHeight: "160px",
+                overflowY: "auto",
+                padding: "4px",
+              }}
+            >
+              {availableIcons.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  onClick={() => setCategoryIcon(ic)}
+                  className="btn-icon"
+                  style={{
+                    width: "100%",
+                    height: "40px",
+                    background: categoryIcon === ic ? "var(--accent-primary-glow)" : "var(--bg-surface-solid)",
+                    border: categoryIcon === ic ? "1px solid var(--accent-primary)" : "1px solid var(--border-color)",
+                    color: categoryIcon === ic ? "var(--accent-primary)" : "var(--text-secondary)",
+                    borderRadius: "var(--radius-sm)",
+                  }}
+                >
+                  <Icon name={ic} size={18} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsCategoryModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={submitting}>
+              Create Category
+            </Button>
+          </div>
         </form>
       </Modal>
     </div>

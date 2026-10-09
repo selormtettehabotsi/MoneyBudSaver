@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from "react";
-import { suggestionsApi, WeeklyReviewResult, SuggestionLogOut, SuggestionItem } from "../api/suggestions";
-import { DisclaimerBanner } from "../components/common/DisclaimerBanner";
+import { useNavigate } from "react-router-dom";
+import { suggestionsApi, WeeklyReviewResult, SuggestionLogOut } from "../api/suggestions";
 import { ApiErrorCard } from "../components/common/ApiErrorCard";
+import { Button } from "../components/common/Button";
+import { Badge } from "../components/common/Badge";
+import { EmptyState } from "../components/common/EmptyState";
+import { SegmentedControl } from "../components/common/SegmentedControl";
+import { LoadingProgress } from "../components/common/LoadingProgress";
 import { useSync } from "../context/SyncContext";
+import { useToast } from "../context/ToastContext";
 import {
   formatRunway,
   formatSavingsRate,
   formatDTI,
 } from "../utils/formatters";
 import {
-  Sparkles,
   RefreshCw,
   AlertTriangle,
   AlertCircle,
@@ -21,7 +26,6 @@ import {
   PieChart,
   Scale,
   History,
-  ArrowRight,
 } from "lucide-react";
 
 interface SuggestionsPageProps {
@@ -29,7 +33,10 @@ interface SuggestionsPageProps {
 }
 
 export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCouncil }) => {
+  const navigate = useNavigate();
   const { loadCachedOrFetch, isOnline } = useSync();
+  const { success: toastSuccess, error: toastError } = useToast();
+
   const [review, setReview] = useState<WeeklyReviewResult | null>(null);
   const [historyLogs, setHistoryLogs] = useState<SuggestionLogOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +62,6 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
         setError(err.message || "Failed to load smart insights.");
         setErrorRequestId(err.requestId || null);
       }
-      console.error("Failed to load suggestions:", err);
     } finally {
       setLoading(false);
     }
@@ -72,24 +78,40 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
       setReview(freshReview);
       const historyRes = await suggestionsApi.getHistory();
       setHistoryLogs(historyRes);
-    } catch (err) {
-      console.error("Failed to re-generate review:", err);
+      toastSuccess("Fresh weekly audit completed.");
+    } catch (err: any) {
+      toastError(err.message || "Failed to run audit.");
     } finally {
       setRefreshing(false);
     }
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 75) return "var(--success)";
-    if (score >= 50) return "var(--warning)";
+  const hasSufficient = review?.metrics_summary?.has_sufficient_data !== false;
+  const score = review?.health_score ?? 50;
+
+  const getScoreColor = (sc: number) => {
+    if (!hasSufficient) return "var(--accent-primary)";
+    if (sc >= 85) return "var(--success)";
+    if (sc >= 70) return "#10b981";
+    if (sc >= 50) return "var(--warning)";
     return "var(--danger)";
   };
 
-  const getScoreGrade = (score: number) => {
-    if (score >= 85) return "Excellent Financial Resilience";
-    if (score >= 70) return "Healthy & Stable Position";
-    if (score >= 50) return "Moderate - Action Advised";
-    return "Vulnerable - Critical Adjustments Required";
+  const getScoreGrade = (sc: number) => {
+    if (!hasSufficient) return "Provisional — Accumulating Baseline Data";
+    if (sc >= 85) return "Excellent Financial Resilience";
+    if (sc >= 70) return "Healthy & Stable Position";
+    if (sc >= 50) return "Moderate – Action Advised";
+    return "Vulnerable – Critical Adjustments Required";
+  };
+
+  const handleAskCouncilForFinding = (title: string) => {
+    const question = `Regarding my financial audit finding: "${title}". What steps should I take?`;
+    if (onNavigateToCouncil) {
+      onNavigateToCouncil(question);
+    } else {
+      navigate("/council", { state: { initialQuestion: question } });
+    }
   };
 
   const filteredSuggestions = review?.suggestions.filter((item) => {
@@ -97,10 +119,20 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
     return item.severity === filterSeverity;
   }) || [];
 
+  const countBySeverity = {
+    all: review?.suggestions.length || 0,
+    critical: review?.suggestions.filter((s) => s.severity === "critical").length || 0,
+    warning: review?.suggestions.filter((s) => s.severity === "warning").length || 0,
+    info: review?.suggestions.filter((s) => s.severity === "info").length || 0,
+  };
+
   if (loading && !review) {
     return (
-      <div className="flex items-center justify-center" style={{ minHeight: "50vh" }}>
-        <RefreshCw size={28} className="text-indigo-400" style={{ animation: "spin 1s linear infinite" }} />
+      <div style={{ minHeight: "50vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <LoadingProgress
+          message="Evaluating financial health indicators..."
+          submessage="Auditing spending trends, debt ratios, and emergency runway"
+        />
       </div>
     );
   }
@@ -117,409 +149,393 @@ export const SuggestionsPage: React.FC<SuggestionsPageProps> = ({ onNavigateToCo
     );
   }
 
-  const score = review?.health_score ?? 50;
   const pillars = review?.metrics_summary?.pillars;
-  const hasSufficient = review?.metrics_summary?.has_sufficient_data !== false;
   const runwayDisplay = formatRunway(pillars?.runway?.runway_months, pillars?.runway?.display, hasSufficient);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%" }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "16px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
         <div>
-          <h1 style={{ fontSize: "26px", display: "flex", alignItems: "center", gap: "10px" }}>
-            <Sparkles size={28} style={{ color: "var(--brand-primary)" }} />
-            Financial Audit & Smart Insights
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <h1
+              style={{
+                fontSize: "clamp(1.5rem, 3.5vw, 1.875rem)",
+                fontWeight: 800,
+                fontFamily: "var(--font-display)",
+                letterSpacing: "-0.03em",
+                color: "var(--text-primary)",
+                margin: 0,
+              }}
+            >
+              Financial Audit & Smart Insights
+            </h1>
+          </div>
           <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "4px" }}>
             Deterministic rule-based weekly reviews, health scoring, and actionable optimizations.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center" style={{ background: "var(--bg-secondary)", borderRadius: "8px", padding: "4px" }}>
-            <button
-              className={`btn btn-sm ${activeTab === "current" ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setActiveTab("current")}
-            >
-              Current Audit
-            </button>
-            <button
-              className={`btn btn-sm ${activeTab === "history" ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setActiveTab("history")}
-            >
-              <History size={14} style={{ marginRight: "6px" }} />
-              History ({historyLogs.length})
-            </button>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {/* Segmented Control for Tabs (Fixes Bug #5) */}
+          <SegmentedControl<"current" | "history">
+            value={activeTab}
+            onChange={(val) => setActiveTab(val)}
+            options={[
+              { id: "current", label: "Current Audit" },
+              { id: "history", label: "History", icon: <History size={14} />, count: historyLogs.length },
+            ]}
+          />
 
-          <button
-            className="btn btn-secondary btn-sm"
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
             onClick={handleGenerate}
             disabled={!isOnline || refreshing}
-            title={!isOnline ? "Re-auditing requires an active connection" : undefined}
+            icon={<RefreshCw size={14} className={refreshing ? "animate-spin" : undefined} />}
           >
-            <RefreshCw size={15} style={{ animation: refreshing ? "spin 1s linear infinite" : "none" }} />
-            <span>{refreshing ? "Auditing..." : "Re-Audit"}</span>
-          </button>
+            {refreshing ? "Auditing..." : "Re-Audit"}
+          </Button>
         </div>
       </div>
 
-      <DisclaimerBanner />
-
-      {/* Limited Spending Data Notice */}
-      {!hasSufficient && (
-        <div
-          className="glass-panel flex items-center gap-3"
-          style={{
-            padding: "12px 16px",
-            background: "rgba(99, 102, 241, 0.08)",
-            border: "1px solid rgba(99, 102, 241, 0.25)",
-            borderRadius: "var(--radius-md)",
-            fontSize: "0.8125rem",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <Info size={18} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
-          <span>
-            <strong>Baseline spending data accumulating:</strong>{" "}
-            {review?.metrics_summary?.data_notice || "Add at least 2 weeks of spending for reliable advice."}
-          </span>
-        </div>
-      )}
-
       {activeTab === "current" && review && (
         <>
-          {/* Health Score Overview Card */}
+          {/* Health Score Overview Hero */}
           <div
             className="glass-panel"
             style={{
-              padding: "24px",
+              padding: "26px 28px",
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "24px",
+              gap: "28px",
               alignItems: "center",
             }}
           >
-            {/* Score Radial / Number Box */}
+            {/* Score Radial Box */}
             <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
               <div
                 style={{
-                  width: "90px",
-                  height: "90px",
+                  width: "92px",
+                  height: "92px",
                   borderRadius: "50%",
                   border: `4px solid ${getScoreColor(score)}`,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  background: "var(--bg-secondary)",
+                  background: "var(--bg-surface-solid)",
                   flexShrink: 0,
+                  boxShadow: `0 0 16px ${getScoreColor(score)}33`,
                 }}
               >
-                <span style={{ fontSize: "28px", fontWeight: 700, color: getScoreColor(score) }}>{score}</span>
-                <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase" }}>/ 100</span>
+                <span className="tabular-nums" style={{ fontSize: "28px", fontWeight: 800, color: getScoreColor(score), lineHeight: 1 }}>
+                  {hasSufficient ? score : "—"}
+                </span>
+                <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", marginTop: "2px" }}>
+                  {hasSufficient ? "/ 100" : "PROV"}
+                </span>
               </div>
 
               <div>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 600 }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.04em" }}>
                   Financial Health Score
                 </span>
-                <h3 style={{ fontSize: "18px", color: getScoreColor(score), margin: "4px 0" }}>
+                <h3 style={{ fontSize: "17px", fontWeight: 700, color: getScoreColor(score), margin: "4px 0" }}>
                   {getScoreGrade(score)}
                 </h3>
                 <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                  Week of {review.week_start_date} • {review.suggestions.length} Findings
+                  Week of {review.week_start_date} · {review.suggestions.length} Findings
                 </span>
               </div>
             </div>
 
-            {/* 4 Pillars Progress Meters */}
+            {/* 4 Pillar Bars */}
             {pillars && (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {/* Savings Rate Pillar */}
+                {/* Savings Rate */}
                 <div>
-                  <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
-                    <span className="flex items-center gap-1">
-                      <TrendingUp size={13} style={{ color: "var(--brand-primary)" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <TrendingUp size={13} style={{ color: "var(--accent-primary)" }} />
                       Savings Rate ({formatSavingsRate(pillars.savings_rate.value_pct)})
                     </span>
-                    <span style={{ fontWeight: 600 }}>{pillars.savings_rate.score} / 25 pts</span>
+                    <strong className="tabular-nums">{pillars.savings_rate.score} / 25 pts</strong>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${(pillars.savings_rate.score / 25) * 100}%` }} />
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${(pillars.savings_rate.score / 25) * 100}%`,
+                        background: "var(--accent-primary)",
+                      }}
+                    />
                   </div>
                 </div>
 
-                {/* Emergency Runway Pillar */}
+                {/* Runway Buffer */}
                 <div>
-                  <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
-                    <span className="flex items-center gap-1">
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                       <Shield size={13} style={{ color: "var(--success)" }} />
                       Runway Buffer ({runwayDisplay})
                     </span>
-                    <span style={{ fontWeight: 600 }}>{pillars.runway.score} / 25 pts</span>
+                    <strong className="tabular-nums">{pillars.runway.score} / 25 pts</strong>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${(pillars.runway.score / 25) * 100}%`, background: "var(--success)" }} />
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${(pillars.runway.score / 25) * 100}%`,
+                        background: "var(--success)",
+                      }}
+                    />
                   </div>
                 </div>
 
-                {/* Debt Burden Pillar */}
+                {/* Debt Burden */}
                 <div>
-                  <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
-                    <span className="flex items-center gap-1">
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                       <CreditCard size={13} style={{ color: "var(--warning)" }} />
                       Debt Burden (DTI: {formatDTI(pillars.debt_burden.dti_pct)})
                     </span>
-                    <span style={{ fontWeight: 600 }}>{pillars.debt_burden.score} / 25 pts</span>
+                    <strong className="tabular-nums">{pillars.debt_burden.score} / 25 pts</strong>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${(pillars.debt_burden.score / 25) * 100}%`, background: "var(--warning)" }} />
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${(pillars.debt_burden.score / 25) * 100}%`,
+                        background: "var(--warning)",
+                      }}
+                    />
                   </div>
                 </div>
 
-                {/* Budget Adherence Pillar */}
+                {/* Budget Adherence */}
                 <div>
-                  <div className="flex justify-between items-center" style={{ fontSize: "12px", marginBottom: "3px" }}>
-                    <span className="flex items-center gap-1">
-                      <PieChart size={13} style={{ color: "var(--brand-accent)" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <PieChart size={13} style={{ color: "var(--accent-secondary)" }} />
                       Budget Adherence ({pillars.budget_adherence.exceeded || 0} Exceeded)
                     </span>
-                    <span style={{ fontWeight: 600 }}>{pillars.budget_adherence.score} / 25 pts</span>
+                    <strong className="tabular-nums">{pillars.budget_adherence.score} / 25 pts</strong>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${(pillars.budget_adherence.score / 25) * 100}%`, background: "var(--brand-accent)" }} />
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        width: `${(pillars.budget_adherence.score / 25) * 100}%`,
+                        background: "var(--accent-secondary)",
+                      }}
+                    />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Findings Filter Bar */}
-          <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
-            <div className="flex items-center gap-2">
-              <span style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: 600 }}>Filter Findings:</span>
-              <button
-                className={`btn btn-xs ${filterSeverity === "all" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setFilterSeverity("all")}
-              >
-                All ({review.suggestions.length})
-              </button>
-              <button
-                className={`btn btn-xs ${filterSeverity === "critical" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setFilterSeverity("critical")}
-              >
-                Critical ({review.suggestions.filter((s) => s.severity === "critical").length})
-              </button>
-              <button
-                className={`btn btn-xs ${filterSeverity === "warning" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setFilterSeverity("warning")}
-              >
-                Warnings ({review.suggestions.filter((s) => s.severity === "warning").length})
-              </button>
-              <button
-                className={`btn btn-xs ${filterSeverity === "info" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setFilterSeverity("info")}
-              >
-                Info ({review.suggestions.filter((s) => s.severity === "info").length})
-              </button>
-            </div>
+          {/* Filter Chips for Findings */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600 }}>Filter Findings:</span>
+            {[
+              { id: "all", label: "All", count: countBySeverity.all },
+              { id: "critical", label: "Critical", count: countBySeverity.critical },
+              { id: "warning", label: "Warnings", count: countBySeverity.warning },
+              { id: "info", label: "Informational", count: countBySeverity.info },
+            ].map((f) => {
+              const isSelected = filterSeverity === f.id;
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilterSeverity(f.id)}
+                  className={`btn btn-sm ${isSelected ? "btn-primary" : "btn-secondary"}`}
+                  style={{
+                    padding: "6px 12px",
+                    minHeight: "34px",
+                    fontSize: "12px",
+                    gap: "6px",
+                  }}
+                >
+                  <span>{f.label}</span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      padding: "1px 6px",
+                      borderRadius: "999px",
+                      background: isSelected ? "rgba(255,255,255,0.25)" : "var(--bg-surface-solid)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {f.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Suggestions List */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {filteredSuggestions.length === 0 ? (
-              <div className="glass-panel text-center" style={{ padding: "40px" }}>
-                <CheckCircle2 size={36} style={{ color: "var(--success)", margin: "0 auto 12px auto" }} />
-                <h3>No findings in this category</h3>
-                <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "4px" }}>
-                  Your finances match optimal safety metrics for this filter!
-                </p>
-              </div>
-            ) : (
-              filteredSuggestions.map((item: SuggestionItem, idx: number) => {
-                const isCritical = item.severity === "critical";
-                const isWarning = item.severity === "warning";
+          {/* Findings List */}
+          {filteredSuggestions.length === 0 ? (
+            <EmptyState
+              icon={<CheckCircle2 size={28} style={{ color: "var(--success)" }} />}
+              title="All Financial Indicators Healthy"
+              description="No optimization issues found matching this filter. Your accounts align with discipline rules."
+            />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {filteredSuggestions.map((item, idx) => {
+                const isCrit = item.severity === "critical";
+                const isWarn = item.severity === "warning";
 
                 return (
                   <div
                     key={idx}
                     className="glass-panel"
                     style={{
-                      padding: "20px",
-                      borderColor: isCritical
-                        ? "var(--danger-border)"
-                        : isWarning
-                        ? "var(--warning-border)"
-                        : "var(--border-color)",
-                      background: isCritical
-                        ? "rgba(244, 63, 94, 0.04)"
-                        : isWarning
-                        ? "rgba(245, 158, 11, 0.04)"
-                        : "var(--bg-secondary)",
+                      padding: "20px 22px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                      borderColor: isCrit ? "var(--danger-border)" : isWarn ? "var(--warning-border)" : "var(--border-color)",
+                      background: isCrit ? "var(--danger-bg)" : isWarn ? "var(--warning-bg)" : "var(--bg-surface)",
                     }}
                   >
-                    <div className="flex items-start justify-between" style={{ gap: "12px", flexWrap: "wrap" }}>
-                      <div className="flex items-start gap-3" style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                         <div
                           style={{
-                            padding: "8px",
+                            width: "32px",
+                            height: "32px",
                             borderRadius: "8px",
-                            background: isCritical
-                              ? "var(--danger-bg)"
-                              : isWarning
-                              ? "var(--warning-bg)"
-                              : "var(--bg-primary)",
-                            color: isCritical
-                              ? "var(--danger)"
-                              : isWarning
-                              ? "var(--warning)"
-                              : "var(--brand-primary)",
-                            marginTop: "2px",
+                            background: isCrit ? "var(--danger)" : isWarn ? "var(--warning)" : "var(--accent-primary)",
+                            color: "#ffffff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
                           }}
                         >
-                          {isCritical ? (
-                            <AlertCircle size={20} />
-                          ) : isWarning ? (
-                            <AlertTriangle size={20} />
-                          ) : (
-                            <Info size={20} />
-                          )}
+                          {isCrit ? <AlertCircle size={16} /> : isWarn ? <AlertTriangle size={16} /> : <Info size={16} />}
                         </div>
-
                         <div>
-                          <div className="flex items-center gap-2" style={{ marginBottom: "4px" }}>
-                            <span
-                              className={`badge ${
-                                isCritical
-                                  ? "badge-danger"
-                                  : isWarning
-                                  ? "badge-warning"
-                                  : "badge-primary"
-                              }`}
-                            >
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <Badge variant={isCrit ? "danger" : isWarn ? "warning" : "info"} size="sm">
                               {item.severity.toUpperCase()}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                color: "var(--text-muted)",
-                                textTransform: "uppercase",
-                                fontWeight: 600,
-                              }}
-                            >
-                              {item.category.replace("_", " ")}
+                            </Badge>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 700 }}>
+                              {item.category}
                             </span>
                           </div>
-
-                          <h3 style={{ fontSize: "16px", marginBottom: "6px" }}>{item.title}</h3>
-                          <p style={{ color: "var(--text-secondary)", fontSize: "14px", lineHeight: "1.5" }}>
-                            {item.description}
-                          </p>
-
-                          {/* Actionable Step Box */}
-                          <div
-                            style={{
-                              marginTop: "12px",
-                              padding: "12px 14px",
-                              borderRadius: "8px",
-                              background: "var(--bg-primary)",
-                              border: "1px solid var(--border-color)",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600 }}>
-                              Action:
-                            </span>
-                            <span style={{ fontSize: "13px", color: "var(--text-primary)" }}>
-                              {item.actionable_step}
-                            </span>
-                          </div>
+                          <h4 style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)", marginTop: "4px" }}>
+                            {item.title}
+                          </h4>
                         </div>
                       </div>
 
-                      {/* Quick Ask Council Action */}
-                      {onNavigateToCouncil && (
-                        <button
-                          className="btn btn-secondary btn-sm flex items-center gap-1"
-                          style={{ alignSelf: "flex-start" }}
-                          onClick={() =>
-                            onNavigateToCouncil(`Regarding my financial audit finding: "${item.title}". What steps should I take?`)
-                          }
-                          title="Ask the AI Council to deliberate on this finding"
-                        >
-                          <Scale size={14} />
-                          <span>Ask Council</span>
-                          <ArrowRight size={13} />
-                        </button>
-                      )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleAskCouncilForFinding(item.title)}
+                        icon={<Scale size={14} style={{ color: "var(--accent-secondary)" }} />}
+                        title="Convene AI Council regarding this finding"
+                      >
+                        Ask Council
+                      </Button>
                     </div>
+
+                    <p style={{ fontSize: "13.5px", color: "var(--text-secondary)", lineHeight: 1.5, marginLeft: "42px" }}>
+                      {item.description}
+                    </p>
+
+                    {item.actionable_step && (
+                      <div
+                        style={{
+                          marginLeft: "42px",
+                          padding: "10px 14px",
+                          borderRadius: "var(--radius-sm)",
+                          background: "var(--bg-surface-solid)",
+                          border: "1px solid var(--border-color)",
+                          fontSize: "13px",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        <strong>Recommended Action:</strong> {item.actionable_step}
+                      </div>
+                    )}
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </>
       )}
 
-      {/* History Tab */}
+      {/* History Tab: Past Weekly Audit Timeline */}
       {activeTab === "history" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           {historyLogs.length === 0 ? (
-            <div className="glass-panel text-center" style={{ padding: "40px" }}>
-              <History size={36} style={{ color: "var(--text-muted)", margin: "0 auto 12px auto" }} />
-              <h3>No Past Audits Found</h3>
-              <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "4px" }}>
-                Past weekly audit snapshots will be archived here automatically.
-              </p>
-            </div>
+            <EmptyState
+              icon={<History size={28} />}
+              title="No previous audit snapshots"
+              description="Past weekly health audits will be archived here as you continue using MoneyCouncil."
+            />
           ) : (
-            historyLogs.map((log: SuggestionLogOut) => {
-              const findings = log.findings;
-              const logScore = findings.health_score || 50;
-
-              return (
-                <div key={log.id} className="glass-panel" style={{ padding: "20px" }}>
-                  <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
-                    <div className="flex items-center gap-3">
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {historyLogs.map((log) => {
+                const sc = log.findings?.health_score ?? 50;
+                const genDate = log.findings?.generated_at || log.created_at;
+                const findingsCount = log.findings?.suggestions?.length ?? 0;
+                return (
+                  <div
+                    key={log.id}
+                    className="glass-panel"
+                    style={{
+                      padding: "16px 20px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "16px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
                       <div
                         style={{
                           width: "48px",
                           height: "48px",
                           borderRadius: "50%",
-                          border: `2px solid ${getScoreColor(logScore)}`,
+                          border: `3px solid ${getScoreColor(sc)}`,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          fontWeight: 700,
+                          fontWeight: 800,
                           fontSize: "16px",
-                          color: getScoreColor(logScore),
+                          color: getScoreColor(sc),
                         }}
                       >
-                        {logScore}
+                        {sc}
                       </div>
-
                       <div>
-                        <h4 style={{ fontSize: "16px" }}>Week of {log.week_start_date}</h4>
-                        <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                          Generated {new Date(log.created_at).toLocaleDateString()} •{" "}
-                          {findings.suggestions?.length || 0} findings recorded
+                        <h4 style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)" }}>
+                          Week of {log.week_start_date}
+                        </h4>
+                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                          Audited on {new Date(genDate).toLocaleDateString()} · {findingsCount} findings
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="badge badge-primary">
-                        Score: {logScore}/100
-                      </span>
-                    </div>
+                    <Badge variant={sc >= 75 ? "success" : sc >= 50 ? "warning" : "danger"} size="sm">
+                      {getScoreGrade(sc)}
+                    </Badge>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
       )}

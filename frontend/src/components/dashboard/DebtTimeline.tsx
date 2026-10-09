@@ -1,5 +1,6 @@
 import React from "react";
-import { AlertCircle, CheckCircle2, ShieldAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, ShieldAlert, Scale, ArrowRight } from "lucide-react";
+import { Button } from "../common/Button";
 
 interface DebtTimelineProps {
   guardrailWarnings: string[];
@@ -13,57 +14,98 @@ export const DebtTimeline: React.FC<DebtTimelineProps> = ({ guardrailWarnings, o
     <div
       className="glass-panel"
       style={{
-        padding: "20px 24px",
-        borderColor: hasBreaches ? "var(--danger-border)" : "var(--border-color)",
-        background: hasBreaches ? "rgba(244, 63, 94, 0.04)" : "var(--bg-surface)",
+        padding: "22px 24px",
+        borderColor: hasBreaches ? "var(--danger-border)" : "var(--success-border)",
+        background: hasBreaches ? "var(--danger-bg)" : "var(--success-bg)",
+        transition: "all 0.2s ease",
       }}
     >
-      <div className="flex items-center justify-between" style={{ marginBottom: "16px" }}>
-        <div className="flex items-center gap-2">
-          {hasBreaches ? (
-            <ShieldAlert size={20} style={{ color: "var(--danger)" }} />
-          ) : (
-            <CheckCircle2 size={20} style={{ color: "var(--success)" }} />
-          )}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "16px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "14px" }}>
+          <div
+            style={{
+              width: "42px",
+              height: "42px",
+              borderRadius: "10px",
+              background: hasBreaches ? "var(--danger)" : "var(--success)",
+              color: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {hasBreaches ? <ShieldAlert size={22} /> : <CheckCircle2 size={22} />}
+          </div>
           <div>
-            <h3 style={{ fontSize: "16px", color: hasBreaches ? "var(--danger)" : "var(--text-primary)" }}>
-              {hasBreaches ? "Hard Guardrail Alert" : "Financial Health Guardrails"}
+            <h3
+              style={{
+                fontSize: "17px",
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                marginBottom: "4px",
+              }}
+            >
+              {hasBreaches ? "Financial Guardrail Warning" : "Financial Health Guardrails Clear"}
             </h3>
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-              {hasBreaches ? "Action required before taking new financial commitments" : "All safety metrics within normal limits"}
-            </span>
+            <p
+              style={{
+                fontSize: "13px",
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+                maxWidth: "680px",
+              }}
+            >
+              {hasBreaches
+                ? "Your financial health metrics have triggered defensive warnings. Consult the AI Council before taking additional loans or major expenses."
+                : "All Debt-to-Income and emergency runway metrics are within healthy thresholds. Continue following your budget and savings plan."}
+            </p>
           </div>
         </div>
 
-        <button className="btn btn-primary btn-sm" onClick={onAskCouncil}>
+        <Button
+          type="button"
+          variant={hasBreaches ? "danger" : "secondary"}
+          size="sm"
+          onClick={onAskCouncil}
+          icon={<Scale size={15} />}
+          iconRight={<ArrowRight size={14} />}
+        >
           Ask Council
-        </button>
+        </Button>
       </div>
 
-      {hasBreaches ? (
-        <div className="flex flex-col gap-2" style={{ marginTop: "12px" }}>
+      {hasBreaches && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
           {guardrailWarnings.map((w, idx) => (
             <div
               key={idx}
-              className="flex items-center gap-2"
               style={{
-                background: "var(--danger-bg)",
-                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                background: "var(--bg-surface)",
+                padding: "10px 14px",
                 borderRadius: "var(--radius-sm)",
                 fontSize: "13px",
                 color: "var(--danger)",
-                fontWeight: 500,
+                fontWeight: 600,
+                border: "1px solid var(--danger-border)",
               }}
             >
-              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>{w}</span>
             </div>
           ))}
         </div>
-      ) : (
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-          Your current DTI ratio and runway are within safe thresholds. If you are planning a significant purchase, new debt, or major budget reallocation, convene the multi-AI Council for advice.
-        </p>
       )}
     </div>
   );

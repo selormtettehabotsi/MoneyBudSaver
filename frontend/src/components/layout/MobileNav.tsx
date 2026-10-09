@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   ReceiptText,
@@ -7,30 +8,30 @@ import {
   Menu,
 } from "lucide-react";
 
-interface MobileNavProps {
-  currentPage: string;
-  onNavigate: (page: string) => void;
-}
+export const MobileNav: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
 
-export const MobileNav: React.FC<MobileNavProps> = ({ currentPage, onNavigate }) => {
-  // Map sub-pages to their parent bottom nav tab
   const getActiveTab = () => {
-    if (currentPage === "dashboard") return "dashboard";
-    if (currentPage === "transactions") return "transactions";
-    if (currentPage === "council") return "council";
-    if (["plan", "budgets", "goals", "debts"].includes(currentPage)) return "plan";
-    if (["more", "suggestions", "data", "settings"].includes(currentPage)) return "more";
+    const p = location.pathname;
+    if (p === "/" || p.startsWith("/dashboard")) return "dashboard";
+    if (p.startsWith("/transactions")) return "transactions";
+    if (p.startsWith("/council")) return "council";
+    if (p.startsWith("/plan")) return "plan";
+    if (p.startsWith("/more") || p.startsWith("/review") || p.startsWith("/data") || p.startsWith("/settings")) {
+      return "more";
+    }
     return "dashboard";
   };
 
   const activeTab = getActiveTab();
 
   const items = [
-    { id: "dashboard", label: "Home", icon: LayoutDashboard },
-    { id: "transactions", label: "Txns", icon: ReceiptText },
-    { id: "council", label: "Council", icon: Scale, highlight: true },
-    { id: "plan", label: "Plan", icon: PieChart },
-    { id: "more", label: "More", icon: Menu },
+    { id: "dashboard", path: "/dashboard", label: "Home", icon: LayoutDashboard },
+    { id: "transactions", path: "/transactions", label: "Txns", icon: ReceiptText },
+    { id: "council", path: "/council", label: "Council", icon: Scale, highlight: true },
+    { id: "plan", path: "/plan/budgets", label: "Plan", icon: PieChart },
+    { id: "more", path: "/more", label: "More", icon: Menu },
   ];
 
   return (
@@ -56,12 +57,13 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentPage, onNavigate })
       }}
     >
       {items.map((item) => {
-        const IconComponent = item.icon;
+        const IconComp = item.icon;
         const isActive = activeTab === item.id;
+
         return (
           <button
             key={item.id}
-            onClick={() => onNavigate(item.id)}
+            onClick={() => navigate(item.path)}
             className="mobile-tab-btn"
             style={{
               background: "transparent",
@@ -76,7 +78,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentPage, onNavigate })
               color: isActive
                 ? "var(--accent-primary)"
                 : item.highlight
-                ? "var(--accent-secondary)"
+                ? "var(--accent-purple)"
                 : "var(--text-muted)",
               cursor: "pointer",
               padding: "4px 8px",
@@ -86,17 +88,21 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentPage, onNavigate })
           >
             <div
               style={{
-                width: "24px",
-                height: "24px",
+                width: item.highlight ? "32px" : "26px",
+                height: item.highlight ? "32px" : "26px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                borderRadius: "6px",
-                background: isActive ? "var(--accent-primary-glow)" : "transparent",
-                transition: "background 0.15s ease",
+                borderRadius: item.highlight ? "50%" : "6px",
+                background: isActive
+                  ? "var(--accent-primary-glow)"
+                  : item.highlight
+                  ? "rgba(99, 102, 241, 0.12)"
+                  : "transparent",
+                transition: "all 0.15s ease",
               }}
             >
-              <IconComponent size={20} />
+              <IconComp size={item.highlight ? 20 : 18} />
             </div>
             <span
               style={{

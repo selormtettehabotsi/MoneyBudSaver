@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { usePinLock } from "../../context/PinLockContext";
 import { useAuth } from "../../context/AuthContext";
+import { useConfirm } from "../../context/ConfirmDialogContext";
 import { Lock, Delete, LogOut } from "lucide-react";
 
 export const PinLockScreen: React.FC = () => {
   const { isLocked, unlock } = usePinLock();
   const { logout } = useAuth();
+  const { confirm } = useConfirm();
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,46 +20,78 @@ export const PinLockScreen: React.FC = () => {
     }
   }, [isLocked]);
 
-  if (!isLocked) return null;
-
-  const handleDigit = (digit: string) => {
-    if (pin.length < 6) {
-      const nextPin = pin + digit;
-      setPin(nextPin);
-      setError(null);
-      if (nextPin.length >= 4) {
-        // Auto-check on 4 or 6 digits
-        attemptUnlock(nextPin);
+  const attemptUnlock = useCallback(
+    async (candidatePin: string) => {
+      const success = await unlock(candidatePin);
+      if (!success) {
+        if (candidatePin.length >= 4) {
+          setError("Incorrect PIN. Please try again.");
+          setShaking(true);
+          setTimeout(() => {
+            setShaking(false);
+            setPin("");
+          }, 450);
+        }
       }
-    }
-  };
+    },
+    [unlock]
+  );
 
-  const handleDelete = () => {
+  const handleDigit = useCallback(
+    (digit: string) => {
+      if (pin.length < 8) {
+        const nextPin = pin + digit;
+        setPin(nextPin);
+        setError(null);
+        if (nextPin.length >= 4) {
+          attemptUnlock(nextPin);
+        }
+      }
+    },
+    [pin, attemptUnlock]
+  );
+
+  const handleDelete = useCallback(() => {
     setPin((prev) => prev.slice(0, -1));
     setError(null);
-  };
+  }, []);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setPin("");
     setError(null);
-  };
+  }, []);
 
-  const attemptUnlock = async (candidatePin: string) => {
-    const success = await unlock(candidatePin);
-    if (!success) {
-      if (candidatePin.length >= 4) {
-        setError("Incorrect PIN. Please try again.");
-        setShaking(true);
-        setTimeout(() => {
-          setShaking(false);
-          setPin("");
-        }, 500);
+  // Physical keyboard support
+  useEffect(() => {
+    if (!isLocked) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= "0" && e.key <= "9") {
+        e.preventDefault();
+        handleDigit(e.key);
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        handleDelete();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        handleClear();
       }
-    }
-  };
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isLocked, handleDigit, handleDelete, handleClear]);
+
+  if (!isLocked) return null;
 
   const handleLogout = async () => {
-    const confirmed = window.confirm("Log out of MoneyCouncil? Your cached offline data will be cleared.");
+    const confirmed = await confirm({
+      title: "Log out of MoneyCouncil?",
+      message: "Your cached offline financial data on this device will be cleared and you will need to sign in again.",
+      confirmText: "Log Out",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
     if (confirmed) {
       await logout();
     }
@@ -65,6 +99,9 @@ export const PinLockScreen: React.FC = () => {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Application PIN Lock Screen"
       style={{
         position: "fixed",
         inset: 0,
@@ -82,9 +119,9 @@ export const PinLockScreen: React.FC = () => {
       <div
         className="glass-panel"
         style={{
-          maxWidth: "340px",
+          maxWidth: "360px",
           width: "100%",
-          padding: "32px 24px",
+          padding: "36px 28px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -95,23 +132,25 @@ export const PinLockScreen: React.FC = () => {
       >
         <div
           style={{
-            width: "56px",
-            height: "56px",
+            width: "60px",
+            height: "60px",
             borderRadius: "50%",
-            background: "rgba(99, 102, 241, 0.15)",
+            background: "var(--accent-primary-glow)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             color: "var(--accent-primary)",
           }}
         >
-          <Lock size={28} />
+          <Lock size={30} />
         </div>
 
         <div style={{ textAlign: "center" }}>
-          <h2 style={{ fontSize: "20px", fontWeight: 700 }}>MoneyCouncil Locked</h2>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-            Enter your security PIN to unlock financial records
+          <h2 style={{ fontSize: "20px", fontWeight: 700, fontFamily: "var(--font-display)" }}>
+            MoneyCouncil Locked
+          </h2>
+          <span style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "4px", display: "block" }}>
+            Enter your security PIN or use your keyboard
           </span>
         </div>
 
@@ -141,7 +180,7 @@ export const PinLockScreen: React.FC = () => {
 
         {error && (
           <div
-            className="badge-danger"
+            className="badge badge-danger"
             style={{
               padding: "6px 12px",
               borderRadius: "var(--radius-sm)",
@@ -189,7 +228,7 @@ export const PinLockScreen: React.FC = () => {
             className="btn btn-ghost"
             style={{
               height: "52px",
-              fontSize: "12px",
+              fontSize: "13px",
               fontWeight: 500,
               color: "var(--text-muted)",
               display: "flex",
@@ -238,21 +277,15 @@ export const PinLockScreen: React.FC = () => {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex items-center gap-1.5"
+          className="btn btn-ghost btn-sm"
           style={{
-            background: "transparent",
-            border: "none",
             color: "var(--text-muted)",
-            fontSize: "0.8125rem",
-            cursor: "pointer",
+            fontSize: "13px",
             marginTop: "8px",
-            minHeight: "44px",
-            minWidth: "44px",
-            padding: "8px 12px",
-            justifyContent: "center",
+            gap: "6px",
           }}
         >
-          <LogOut size={15} />
+          <LogOut size={14} />
           <span>Forgot PIN? Log Out & Re-sync</span>
         </button>
       </div>

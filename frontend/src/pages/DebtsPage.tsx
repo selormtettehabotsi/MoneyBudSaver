@@ -3,12 +3,31 @@ import { debtsApi } from "../api/debts";
 import { Debt } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
 import { useSync } from "../context/SyncContext";
+import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmDialogContext";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, CreditCard, Edit2, Trash2, ArrowUpRight, AlertCircle } from "lucide-react";
+import { Button } from "../components/common/Button";
+import { EmptyState } from "../components/common/EmptyState";
+import { MoneyInput } from "../components/common/MoneyInput";
+import { Badge } from "../components/common/Badge";
+import {
+  Plus,
+  CreditCard,
+  Edit2,
+  Trash2,
+  ArrowUpRight,
+  ShieldCheck,
+  AlertTriangle,
+  Clock,
+} from "lucide-react";
+import { Skeleton } from "../components/common/Skeleton";
 
 export const DebtsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
   const { loadCachedOrFetch, isOnline } = useSync();
+  const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast();
+  const { confirm } = useConfirm();
+
   const [debts, setDebts] = useState<Debt[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -18,7 +37,7 @@ export const DebtsPage: React.FC = () => {
   const [name, setName] = useState("");
   const [totalPrincipal, setTotalPrincipal] = useState("");
   const [remainingBalance, setRemainingBalance] = useState("");
-  const [interestRate, setInterestRate] = useState("0.000");
+  const [interestRate, setInterestRate] = useState("0.00");
   const [minimumPayment, setMinimumPayment] = useState("");
   const [dueDay, setDueDay] = useState(1);
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
@@ -30,6 +49,7 @@ export const DebtsPage: React.FC = () => {
   const [paymentAmount, setPaymentAmount] = useState("");
 
   const [modalError, setModalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const loadDebts = async () => {
     setLoading(true);
@@ -48,11 +68,15 @@ export const DebtsPage: React.FC = () => {
   }, []);
 
   const handleOpenCreate = () => {
+    if (!isOnline) {
+      toastWarning("Recording loans requires an active network connection.");
+      return;
+    }
     setEditingDebt(null);
     setName("");
     setTotalPrincipal("");
     setRemainingBalance("");
-    setInterestRate("0.000");
+    setInterestRate("0.00");
     setMinimumPayment("");
     setDueDay(1);
     setStartDate(new Date().toISOString().split("T")[0]);
@@ -62,6 +86,10 @@ export const DebtsPage: React.FC = () => {
   };
 
   const handleOpenEdit = (d: Debt) => {
+    if (!isOnline) {
+      toastWarning("Editing debt entries requires an active network connection.");
+      return;
+    }
     setEditingDebt(d);
     setName(d.name);
     setTotalPrincipal(d.total_principal);
@@ -76,6 +104,10 @@ export const DebtsPage: React.FC = () => {
   };
 
   const handleOpenPayment = (d: Debt) => {
+    if (!isOnline) {
+      toastWarning("Recording payments requires an active network connection.");
+      return;
+    }
     setPayingDebt(d);
     setPaymentAmount(d.minimum_payment);
     setModalError(null);
@@ -83,46 +115,73 @@ export const DebtsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this debt entry?")) return;
+    if (!isOnline) {
+      toastWarning("Deleting debt entries requires an active network connection.");
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "Delete Debt Entry?",
+      message: "Are you sure you want to permanently delete this debt record?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+
+    if (!confirmed) return;
+
     try {
       await debtsApi.delete(id);
+      toastSuccess("Debt entry removed.");
       loadDebts();
     } catch (err: any) {
-      alert(err.message || "Failed to delete debt.");
+      toastError(err.message || "Failed to delete debt.");
     }
   };
 
   const handleSaveDebt = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
+
+    const principalNum = parseFloat(totalPrincipal);
+    if (!principalNum || isNaN(principalNum) || principalNum <= 0) {
+      setModalError("Please enter a valid total principal amount.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       if (editingDebt) {
         await debtsApi.update(editingDebt.id, {
-          name,
-          total_principal: totalPrincipal,
-          remaining_balance: remainingBalance,
-          interest_rate: interestRate,
-          minimum_payment: minimumPayment,
-          due_day_of_month: dueDay,
-          start_date: startDate,
-          notes,
-        });
-      } else {
-        await debtsApi.create({
-          name,
+          name: name.trim(),
           total_principal: totalPrincipal,
           remaining_balance: remainingBalance || totalPrincipal,
-          interest_rate: interestRate,
-          minimum_payment: minimumPayment,
+          interest_rate: interestRate || "0.00",
+          minimum_payment: minimumPayment || "0.00",
           due_day_of_month: dueDay,
           start_date: startDate,
-          notes,
+          notes: notes.trim() || undefined,
         });
+        toastSuccess("Debt details updated.");
+      } else {
+        await debtsApi.create({
+          name: name.trim(),
+          total_principal: totalPrincipal,
+          remaining_balance: remainingBalance || totalPrincipal,
+          interest_rate: interestRate || "0.00",
+          minimum_payment: minimumPayment || "0.00",
+          due_day_of_month: dueDay,
+          start_date: startDate,
+          notes: notes.trim() || undefined,
+        });
+        toastSuccess("Debt recorded.");
       }
       setIsDebtModalOpen(false);
       loadDebts();
     } catch (err: any) {
       setModalError(err.message || "Failed to save debt.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -130,281 +189,407 @@ export const DebtsPage: React.FC = () => {
     e.preventDefault();
     if (!payingDebt) return;
     setModalError(null);
+
+    const payNum = parseFloat(paymentAmount);
+    if (!payNum || isNaN(payNum) || payNum <= 0) {
+      setModalError("Please enter a valid payment amount greater than zero.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       await debtsApi.recordPayment(payingDebt.id, paymentAmount);
       setIsPaymentModalOpen(false);
+      toastSuccess(`Payment of ${formatMoney(paymentAmount)} recorded for "${payingDebt.name}".`);
       loadDebts();
     } catch (err: any) {
       setModalError(err.message || "Failed to record payment.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const totalDebtBalance = debts.reduce((acc, d) => acc + parseFloat(d.remaining_balance || "0"), 0);
-  const totalMonthlyObligations = debts.reduce((acc, d) => acc + parseFloat(d.minimum_payment || "0"), 0);
+  // Payoff calculations
+  const calculatePayoff = (remainingStr: string, minPaymentStr: string, aprStr: string) => {
+    const bal = parseFloat(remainingStr || "0");
+    const pmt = parseFloat(minPaymentStr || "0");
+    const apr = parseFloat(aprStr || "0") / 100;
+
+    if (bal <= 0) return { label: "Fully Paid Off!", status: "paid" as const };
+    if (pmt <= 0) return { label: "No monthly payment scheduled", status: "neutral" as const };
+
+    const monthlyInterest = (bal * apr) / 12;
+    if (pmt <= monthlyInterest) {
+      return {
+        label: "Payment below interest — this debt will grow!",
+        status: "danger" as const,
+      };
+    }
+
+    // Amortization approximation
+    const months = Math.ceil(
+      -Math.log(1 - (monthlyInterest / pmt)) / Math.log(1 + apr / 12)
+    );
+
+    if (isNaN(months) || months <= 0) {
+      return { label: "Fully amortized", status: "success" as const };
+    }
+
+    return {
+      label: `~${months} month${months > 1 ? "s" : ""} to full payoff`,
+      status: "normal" as const,
+    };
+  };
+
+  // Summaries
+  const totalBalance = debts.reduce((acc, d) => acc + parseFloat(d.remaining_balance || "0"), 0);
+  const totalMonthlyPayments = debts.reduce((acc, d) => acc + parseFloat(d.minimum_payment || "0"), 0);
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <h1 style={{ fontSize: "26px" }}>Debts & Loans</h1>
-          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Amortization timelines, interest rates, and debt payoff acceleration
-          </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
+      {/* Summary Strip */}
+      <div
+        className="glass-panel"
+        style={{
+          padding: "18px 24px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "16px",
+        }}
+      >
+        <div style={{ display: "flex", gap: "24px", alignItems: "baseline", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+              Total Outstanding Balance
+            </div>
+            <div
+              className="tabular-nums"
+              style={{
+                fontSize: "22px",
+                fontWeight: 800,
+                color: totalBalance > 0 ? "var(--danger)" : "var(--success)",
+              }}
+            >
+              {formatMoney(totalBalance)}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+              Total Monthly Minimums
+            </div>
+            <div className="tabular-nums" style={{ fontSize: "18px", fontWeight: 700, color: "var(--text-primary)" }}>
+              {formatMoney(totalMonthlyPayments)}
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {!isOnline && (
-            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
-              <AlertCircle size={12} />
-              <span>Editing offline is disabled</span>
-            </span>
-          )}
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={!isOnline}
-            onClick={handleOpenCreate}
-            title={!isOnline ? "Adding debts requires an active connection" : undefined}
-          >
-            <PlusCircle size={15} />
-            <span>Add Loan / Debt</span>
-          </button>
-        </div>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={handleOpenCreate}
+          icon={<Plus size={15} />}
+          disabled={!isOnline}
+        >
+          Add Debt or Loan
+        </Button>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="glass-panel" style={{ padding: "16px 20px" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Outstanding Balance</span>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--danger)", marginTop: "4px" }}>
-            {formatMoney(totalDebtBalance)}
-          </div>
+      {/* Debt Cards Grid */}
+      {loading && debts.length === 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          <Skeleton height="200px" borderRadius="var(--radius-lg)" />
+          <Skeleton height="200px" borderRadius="var(--radius-lg)" />
         </div>
+      ) : debts.length === 0 ? (
+        <EmptyState
+          icon={<ShieldCheck size={32} style={{ color: "var(--success)" }} />}
+          title="No debts recorded — clean balance sheet!"
+          description="You currently have zero outstanding liabilities logged. Keep up the disciplined financial freedom!"
+          actionLabel="Record a Loan or Credit Balance"
+          onAction={handleOpenCreate}
+        />
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          {debts.map((d) => {
+            const principal = parseFloat(d.total_principal || "0");
+            const balance = parseFloat(d.remaining_balance || "0");
+            const paid = Math.max(0, principal - balance);
+            const paidPct = principal > 0 ? (paid / principal) * 100 : 0;
+            const isPaidOff = balance <= 0;
+            const apr = parseFloat(d.interest_rate || "0");
+            const payoff = calculatePayoff(d.remaining_balance, d.minimum_payment, d.interest_rate);
 
-        <div className="glass-panel" style={{ padding: "16px 20px" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Monthly Payments</span>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--warning)", marginTop: "4px" }}>
-            {formatMoney(totalMonthlyObligations)}
-          </div>
-        </div>
-      </div>
-
-      {/* Debts Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {loading ? (
-          <div style={{ gridColumn: "1 / -1", padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Loading debts and loans...
-          </div>
-        ) : debts.length === 0 ? (
-          <div
-            className="glass-panel"
-            style={{ gridColumn: "1 / -1", padding: "48px 24px", textAlign: "center", color: "var(--text-muted)" }}
-          >
-            No outstanding loans or debts recorded. Clean balance sheet!
-          </div>
-        ) : (
-          debts.map((d) => {
-            const isZero = parseFloat(d.remaining_balance || "0") <= 0;
             return (
               <div
                 key={d.id}
-                className="glass-panel flex flex-col justify-between"
-                style={{ padding: "20px 22px", position: "relative" }}
+                className="glass-panel"
+                style={{
+                  padding: "20px 22px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  borderColor: isPaidOff ? "var(--success-border)" : "var(--border-color)",
+                }}
               >
                 <div>
-                  <div className="flex items-center justify-between" style={{ marginBottom: "12px" }}>
-                    <div className="flex items-center gap-2">
-                      <CreditCard size={18} style={{ color: "var(--danger)" }} />
-                      <h3 style={{ fontSize: "16px" }}>{d.name}</h3>
-                    </div>
-
-                    <span className={`badge ${isZero ? "badge-success" : "badge-danger"}`}>
-                      {isZero ? "Paid Off" : `${parseFloat(d.interest_rate || "0").toFixed(1)}% APR`}
-                    </span>
-                  </div>
-
-                  {/* Numbers */}
-                  <div className="flex items-center justify-between tabular-nums" style={{ margin: "14px 0 8px 0" }}>
-                    <div>
-                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Remaining Balance</span>
-                      <div style={{ fontSize: "clamp(1.1rem, 3.5vw, 1.35rem)", fontWeight: 700, color: "var(--danger)" }}>
-                        {formatMoney(d.remaining_balance)}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div
+                        style={{
+                          width: "38px",
+                          height: "38px",
+                          borderRadius: "10px",
+                          background: isPaidOff ? "var(--success-bg)" : "var(--danger-bg)",
+                          color: isPaidOff ? "var(--success)" : "var(--danger)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isPaidOff ? <ShieldCheck size={18} /> : <CreditCard size={18} />}
+                      </div>
+                      <div>
+                        <h4 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>
+                          {d.name}
+                        </h4>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                          <span>Due day: {d.due_day_of_month}th</span>
+                        </div>
                       </div>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Monthly Payment</span>
-                      <div style={{ fontSize: "0.9375rem", fontWeight: 600 }}>{formatMoney(d.minimum_payment)}</div>
+
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      {apr > 0 && (
+                        <Badge variant="warning" size="sm">
+                          {apr.toFixed(1)}% APR
+                        </Badge>
+                      )}
+                      {isPaidOff && (
+                        <Badge variant="success" size="sm">
+                          Paid Off
+                        </Badge>
+                      )}
                     </div>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="progress-bar-bg" style={{ height: "8px", margin: "10px 0" }}>
+                  {d.notes && (
+                    <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "12px", lineHeight: 1.4 }}>
+                      {d.notes}
+                    </p>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>
+                        Remaining Balance
+                      </span>
+                      <span
+                        className="tabular-nums"
+                        style={{
+                          fontSize: "19px",
+                          fontWeight: 800,
+                          color: isPaidOff ? "var(--success)" : "var(--danger)",
+                        }}
+                      >
+                        {formatMoney(balance)}
+                      </span>
+                    </div>
+
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>
+                        Monthly Payment
+                      </span>
+                      <span className="tabular-nums" style={{ fontSize: "14px", fontWeight: 700 }}>
+                        {formatMoney(d.minimum_payment)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="progress-bar-bg" style={{ height: "6px" }}>
                     <div
                       className="progress-bar-fill"
                       style={{
-                        width: `${Math.min(100, d.payoff_progress_percentage)}%`,
-                        background: "linear-gradient(90deg, #10b981 0%, #06b6d4 100%)",
+                        width: `${Math.min(100, Math.max(1, paidPct))}%`,
+                        background: isPaidOff ? "var(--success)" : "var(--accent-primary)",
                       }}
                     />
                   </div>
 
-                  {/* Timeline Estimates */}
-                  <div className="flex items-center justify-between tabular-nums" style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "8px" }}>
-                    <span>Paid: {d.payoff_progress_percentage.toFixed(0)}%</span>
-                    <span>
-                      {d.months_to_payoff !== null
-                        ? d.months_to_payoff === 0
-                          ? "Fully amortized"
-                          : `~${d.months_to_payoff} months remaining`
-                        : "Payment below interest"}
-                    </span>
+                  {/* Payoff line */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      marginTop: "10px",
+                      fontSize: "12px",
+                      color:
+                        payoff.status === "danger"
+                          ? "var(--danger)"
+                          : payoff.status === "paid"
+                          ? "var(--success)"
+                          : "var(--text-secondary)",
+                    }}
+                  >
+                    {payoff.status === "danger" ? (
+                      <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                    ) : (
+                      <Clock size={13} style={{ flexShrink: 0 }} />
+                    )}
+                    <span>{payoff.label}</span>
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div
-                  className="flex items-center justify-between"
-                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px", flexWrap: "wrap", gap: "8px" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    borderTop: "1px solid var(--border-color)",
+                    paddingTop: "12px",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                  }}
                 >
-                  <button
-                    className="btn btn-success btn-sm"
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
                     onClick={() => handleOpenPayment(d)}
-                    disabled={isZero}
-                    style={{ minHeight: "44px" }}
+                    icon={<ArrowUpRight size={14} />}
+                    disabled={!isOnline || isPaidOff}
                   >
-                    <ArrowUpRight size={16} />
-                    <span>Record Payment</span>
-                  </button>
+                    Record Payment
+                  </Button>
 
-                  <div className="flex items-center gap-1">
+                  <div style={{ display: "flex", gap: "4px" }}>
                     <button
+                      type="button"
                       onClick={() => handleOpenEdit(d)}
+                      aria-label="Edit Debt"
+                      disabled={!isOnline}
                       className="btn-icon"
-                      title="Edit Loan"
-                      aria-label="Edit Loan"
+                      style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px" }}
                     >
-                      <Edit2 size={18} />
+                      <Edit2 size={14} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleDelete(d.id)}
+                      aria-label="Delete Debt"
+                      disabled={!isOnline}
                       className="btn-icon"
-                      style={{ color: "var(--danger)" }}
-                      title="Delete Loan"
-                      aria-label="Delete Loan"
+                      style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px", color: "var(--danger)" }}
                     >
-                      <Trash2 size={18} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
-      {/* Create / Edit Modal */}
+      {/* Add / Edit Debt Modal */}
       <Modal
         isOpen={isDebtModalOpen}
         onClose={() => setIsDebtModalOpen(false)}
-        title={editingDebt ? "Edit Loan Record" : "Add Loan / Debt"}
+        title={editingDebt ? "Edit Loan / Debt" : "Record New Loan or Credit"}
       >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSaveDebt} className="flex flex-col gap-4">
+        <form onSubmit={handleSaveDebt} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
+
           <div className="input-group">
             <label className="input-label">Debt / Loan Name</label>
             <input
               type="text"
               required
-              placeholder="e.g. Car Loan / Bank Overdraft"
               className="input-field"
+              placeholder="e.g. Student Loan, Car Loan, Bank Overdraft"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              autoFocus
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="input-group">
-              <label className="input-label">Total Principal</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                required
-                placeholder="0.00"
-                className="input-field"
-                value={totalPrincipal}
-                onChange={(e) => setTotalPrincipal(e.target.value)}
-              />
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Remaining Balance</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.00"
-                required
-                placeholder="0.00"
-                className="input-field"
-                value={remainingBalance}
-                onChange={(e) => setRemainingBalance(e.target.value)}
-              />
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <MoneyInput
+              label="Total Principal"
+              value={totalPrincipal}
+              onChange={(val) => setTotalPrincipal(val)}
+              placeholder="10000.00"
+              required
+            />
+            <MoneyInput
+              label="Remaining Balance"
+              value={remainingBalance}
+              onChange={(val) => setRemainingBalance(val)}
+              placeholder="8500.00"
+              required
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div className="input-group">
-              <label className="input-label">Annual Interest Rate (% APR)</label>
+              <label className="input-label">Annual APR (%)</label>
               <input
                 type="number"
-                step="0.001"
-                min="0.000"
-                required
-                placeholder="0.000"
-                className="input-field"
+                step="0.01"
+                min="0"
+                className="input-field tabular-nums"
+                placeholder="14.5"
                 value={interestRate}
                 onChange={(e) => setInterestRate(e.target.value)}
               />
             </div>
-
-            <div className="input-group">
-              <label className="input-label">Monthly Minimum Payment</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                required
-                placeholder="0.00"
-                className="input-field"
-                value={minimumPayment}
-                onChange={(e) => setMinimumPayment(e.target.value)}
-              />
-            </div>
+            <MoneyInput
+              label="Monthly Minimum"
+              value={minimumPayment}
+              onChange={(val) => setMinimumPayment(val)}
+              placeholder="350.00"
+              required
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div className="input-group">
               <label className="input-label">Due Day of Month (1-31)</label>
               <input
                 type="number"
                 min="1"
                 max="31"
-                required
-                className="input-field"
+                className="input-field tabular-nums"
                 value={dueDay}
                 onChange={(e) => setDueDay(parseInt(e.target.value) || 1)}
               />
             </div>
-
             <div className="input-group">
               <label className="input-label">Start Date</label>
               <input
                 type="date"
-                required
                 className="input-field"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -412,45 +597,73 @@ export const DebtsPage: React.FC = () => {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }}>
-            {editingDebt ? "Save Changes" : "Save Loan Record"}
-          </button>
-        </form>
-      </Modal>
-
-      {/* Record Payment Modal */}
-      <Modal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        title="Record Loan Payment"
-      >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSavePayment} className="flex flex-col gap-4">
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Recording payment for: <strong>{payingDebt?.name}</strong> (Current balance: {formatMoney(payingDebt?.remaining_balance)})
-          </p>
-
           <div className="input-group">
-            <label className="input-label">Payment Amount</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              required
-              placeholder="0.00"
+            <label className="input-label">Notes (Optional)</label>
+            <textarea
               className="input-field"
-              value={paymentAmount}
-              onChange={(e) => setPaymentAmount(e.target.value)}
+              placeholder="Lender details, account number, or repayment notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              style={{ minHeight: "64px" }}
             />
           </div>
 
-          <button type="submit" className="btn btn-success" style={{ marginTop: "10px" }}>
-            Confirm Payment
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsDebtModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={submitting}>
+              {editingDebt ? "Save Changes" : "Record Debt"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Record Loan Payment Modal */}
+      <Modal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        title={`Record Payment for "${payingDebt?.name}"`}
+      >
+        <form onSubmit={handleSavePayment} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
+
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "var(--bg-surface-solid)",
+              borderRadius: "var(--radius-sm)",
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "13px",
+            }}
+          >
+            <span style={{ color: "var(--text-secondary)" }}>Current Remaining Balance:</span>
+            <strong className="tabular-nums">{formatMoney(payingDebt?.remaining_balance || "0")}</strong>
+          </div>
+
+          <MoneyInput
+            label="Payment Amount"
+            value={paymentAmount}
+            onChange={(val) => setPaymentAmount(val)}
+            placeholder="350.00"
+            required
+            autoFocus
+          />
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsPaymentModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={submitting}>
+              Confirm Payment
+            </Button>
+          </div>
         </form>
       </Modal>
     </div>

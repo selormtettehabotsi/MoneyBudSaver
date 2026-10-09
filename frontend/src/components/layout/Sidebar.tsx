@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   ReceiptText,
@@ -7,184 +8,380 @@ import {
   CreditCard,
   Scale,
   Sparkles,
+  Database,
   Settings as SettingsIcon,
   LogOut,
   Sun,
   Moon,
+  Lock,
+  ChevronLeft,
+  ChevronRight,
+  LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
 import { useCurrency } from "../../context/CurrencyContext";
-
 import { usePinLock } from "../../context/PinLockContext";
+import { useConfirm } from "../../context/ConfirmDialogContext";
 import { SyncStatusIndicator } from "../common/SyncStatusIndicator";
-import { Lock } from "lucide-react";
+import { Badge } from "../common/Badge";
 
-interface SidebarProps {
-  currentPage: string;
-  onNavigate: (page: string) => void;
+interface NavItem {
+  id: string;
+  path: string;
+  label: string;
+  icon: LucideIcon;
+  highlight?: boolean;
+  badge?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+export const Sidebar: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { currency } = useCurrency();
+  const { symbol, currency } = useCurrency();
   const { isPinSet, lockNow } = usePinLock();
+  const { confirm } = useConfirm();
+  const [collapsed, setCollapsed] = React.useState(false);
 
-  const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "transactions", label: "Transactions", icon: ReceiptText },
-    { id: "budgets", label: "Budgets", icon: PieChart },
-    { id: "goals", label: "Savings Goals", icon: Target },
-    { id: "debts", label: "Debts & Loans", icon: CreditCard },
-    { id: "council", label: "Ask the Council", icon: Scale, highlight: true },
-    { id: "suggestions", label: "Smart Review", icon: Sparkles },
-    { id: "settings", label: "Settings", icon: SettingsIcon },
+  const navGroups: NavGroup[] = [
+    {
+      title: "Overview",
+      items: [
+        { id: "dashboard", path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      ],
+    },
+    {
+      title: "Money",
+      items: [
+        { id: "transactions", path: "/transactions", label: "Transactions", icon: ReceiptText },
+        { id: "budgets", path: "/plan/budgets", label: "Budgets", icon: PieChart },
+        { id: "goals", path: "/plan/goals", label: "Savings Goals", icon: Target },
+        { id: "debts", path: "/plan/debts", label: "Debts & Loans", icon: CreditCard },
+      ],
+    },
+    {
+      title: "Advice",
+      items: [
+        {
+          id: "council",
+          path: "/council",
+          label: "Ask the Council",
+          icon: Scale,
+          highlight: true,
+          badge: "AI",
+        },
+        { id: "review", path: "/review", label: "Smart Review", icon: Sparkles },
+      ],
+    },
+    {
+      title: "Account",
+      items: [
+        { id: "data", path: "/data", label: "Data & Backups", icon: Database },
+        { id: "settings", path: "/settings", label: "Settings", icon: SettingsIcon },
+      ],
+    },
   ];
+
+  const handleLogout = async () => {
+    const confirmed = await confirm({
+      title: "Sign Out of MoneyCouncil?",
+      message: "Are you sure you want to sign out? Any unsaved local changes will be cleared.",
+      confirmText: "Sign Out",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (confirmed) {
+      await logout();
+      navigate("/login");
+    }
+  };
+
+  const isItemActive = (path: string) => {
+    if (path === "/dashboard") return location.pathname === "/" || location.pathname === "/dashboard";
+    if (path.startsWith("/plan/")) return location.pathname === path;
+    if (path === "/council") return location.pathname.startsWith("/council");
+    if (path === "/review") return location.pathname === "/review" || location.pathname === "/suggestions";
+    if (path === "/settings") return location.pathname.startsWith("/settings");
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <aside
       className="sidebar glass-panel"
       style={{
-        width: "var(--sidebar-width)",
+        width: collapsed ? "76px" : "var(--sidebar-width)",
         height: "calc(100vh - 32px)",
         margin: "16px 0 16px 16px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
-        padding: "20px 16px",
+        padding: collapsed ? "16px 8px" : "20px 16px",
         position: "sticky",
         top: "16px",
+        transition: "width 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+        overflowY: "auto",
+        overflowX: "hidden",
+        zIndex: 50,
       }}
     >
       <div>
-        {/* Logo */}
+        {/* Logo and Collapse Toggle */}
         <div
-          className="flex items-center justify-between"
-          style={{ padding: "8px 12px", marginBottom: "20px" }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: collapsed ? "center" : "space-between",
+            padding: "4px 8px",
+            marginBottom: "16px",
+          }}
         >
           <div
-            className="flex items-center gap-3"
-            style={{ cursor: "pointer" }}
-            onClick={() => onNavigate("dashboard")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              cursor: "pointer",
+            }}
+            onClick={() => navigate("/dashboard")}
+            title="MoneyCouncil"
           >
-            <img src="/favicon.svg" alt="MoneyCouncil" style={{ width: "32px", height: "32px" }} />
-            <div>
-              <h2 style={{ fontSize: "17px", fontWeight: 800, letterSpacing: "-0.03em" }}>MoneyCouncil</h2>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600 }}>AI ADVISOR & BUDGET</span>
-            </div>
+            <img src="/favicon.svg" alt="MoneyCouncil Logo" style={{ width: "32px", height: "32px", flexShrink: 0 }} />
+            {!collapsed && (
+              <div>
+                <h2
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: 800,
+                    letterSpacing: "-0.03em",
+                    fontFamily: "var(--font-display)",
+                    color: "var(--text-primary)",
+                    lineHeight: 1.1,
+                  }}
+                >
+                  MoneyCouncil
+                </h2>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: "var(--accent-primary)",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  ENSEMBLE AI
+                </span>
+              </div>
+            )}
           </div>
+
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              className="btn-icon"
+              style={{ width: "28px", height: "28px", minWidth: "28px", minHeight: "28px" }}
+              title="Collapse sidebar"
+            >
+              <ChevronLeft size={16} />
+            </button>
+          )}
         </div>
+
+        {collapsed && (
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              aria-label="Expand sidebar"
+              className="btn-icon"
+              style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px" }}
+              title="Expand sidebar"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Sync Status Badge */}
-        <div style={{ padding: "0 12px 14px 12px" }}>
-          <SyncStatusIndicator />
-        </div>
+        {!collapsed && (
+          <div style={{ padding: "0 4px 14px 4px" }}>
+            <SyncStatusIndicator />
+          </div>
+        )}
 
-        {/* Nav Links */}
-        <nav className="flex flex-col gap-1">
-          {navItems.map((item) => {
-            const IconComponent = item.icon;
-            const isActive = currentPage === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onNavigate(item.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: "10px 14px",
-                  borderRadius: "var(--radius-md)",
-                  border: "none",
-                  background: isActive
-                    ? item.highlight
-                      ? "linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%)"
-                      : "var(--bg-surface-hover)"
-                    : "transparent",
-                  color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                  fontWeight: isActive ? 600 : 500,
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  transition: "all 0.15s ease",
-                  borderLeft: isActive ? "3px solid var(--accent-primary)" : "3px solid transparent",
-                }}
-              >
-                <IconComponent
-                  size={18}
+        {/* Grouped Nav Items */}
+        <nav style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {navGroups.map((group) => (
+            <div key={group.title}>
+              {!collapsed && (
+                <div
                   style={{
-                    color: isActive
-                      ? "var(--accent-primary)"
-                      : item.highlight
-                      ? "var(--accent-secondary)"
-                      : "var(--text-muted)",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    padding: "4px 10px 6px 10px",
                   }}
-                />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+                >
+                  {group.title}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                {group.items.map((item) => {
+                  const IconComp = item.icon;
+                  const active = isItemActive(item.path);
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => navigate(item.path)}
+                      title={collapsed ? item.label : undefined}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: collapsed ? "center" : "space-between",
+                        padding: collapsed ? "10px 0" : "9px 12px",
+                        borderRadius: "var(--radius-md)",
+                        border: active
+                          ? "1px solid var(--accent-primary-glow)"
+                          : "1px solid transparent",
+                        background: active
+                          ? "linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.10) 100%)"
+                          : item.highlight && !collapsed
+                          ? "rgba(99, 102, 241, 0.05)"
+                          : "transparent",
+                        color: active
+                          ? "var(--accent-primary)"
+                          : "var(--text-secondary)",
+                        fontWeight: active ? 700 : 500,
+                        fontSize: "13.5px",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                        width: "100%",
+                        minHeight: "42px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <IconComp
+                          size={18}
+                          className={active ? "text-indigo-400" : undefined}
+                          style={{
+                            color: active
+                              ? "var(--accent-primary)"
+                              : item.highlight
+                              ? "var(--accent-purple)"
+                              : "inherit",
+                            flexShrink: 0,
+                          }}
+                        />
+                        {!collapsed && <span>{item.label}</span>}
+                      </div>
+
+                      {!collapsed && item.badge && (
+                        <Badge variant="brand" size="sm">
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
       </div>
 
-      {/* User info & Theme switch */}
-      <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: "16px" }} className="flex flex-col gap-3">
-        <div className="flex items-center justify-between" style={{ padding: "0 8px" }}>
-          <div className="flex flex-col">
-            <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-primary)", maxWidth: "130px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {user?.email}
-            </span>
-            <span style={{ fontSize: "11px", color: "var(--accent-secondary)", fontWeight: 600 }}>
-              Currency: {currency}
-            </span>
-          </div>
+      {/* Footer User Info & Controls */}
+      <div
+        style={{
+          borderTop: "1px solid var(--border-color)",
+          paddingTop: "14px",
+          marginTop: "16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        {!collapsed && user && (
+          <div
+            style={{
+              padding: "8px 10px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-surface-solid)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+            }}
+          >
+            <div style={{ overflow: "hidden", minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {user.email}
+              </div>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                {currency || "GHS"} ({symbol})
+              </div>
+            </div>
 
-          <div className="flex items-center gap-1.5">
-            {isPinSet && (
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              {isPinSet && (
+                <button
+                  type="button"
+                  onClick={lockNow}
+                  className="btn-icon"
+                  style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px", color: "var(--accent-primary)" }}
+                  title="Lock App"
+                >
+                  <Lock size={15} />
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={lockNow}
-                style={{
-                  background: "var(--bg-surface-solid)",
-                  border: "1px solid var(--border-color)",
-                  padding: "6px",
-                  borderRadius: "var(--radius-sm)",
-                  color: "var(--accent-primary)",
-                  cursor: "pointer",
-                }}
-                title="Lock App"
+                onClick={toggleTheme}
+                className="btn-icon"
+                style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px" }}
+                title="Toggle Theme"
               >
-                <Lock size={15} />
+                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={toggleTheme}
-              style={{
-                background: "var(--bg-surface-solid)",
-                border: "1px solid var(--border-color)",
-                padding: "6px",
-                borderRadius: "var(--radius-sm)",
-                color: "var(--text-secondary)",
-                cursor: "pointer",
-              }}
-              title="Toggle theme"
-            >
-              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <button
           type="button"
-          onClick={logout}
-          className="btn btn-secondary btn-sm"
-          style={{ width: "100%", justifyContent: "flex-start", gap: "8px" }}
+          onClick={handleLogout}
+          className="btn btn-ghost btn-sm"
+          style={{
+            width: "100%",
+            justifyContent: collapsed ? "center" : "flex-start",
+            gap: "8px",
+            color: "var(--danger)",
+          }}
+          title="Sign Out"
         >
-          <LogOut size={15} />
-          <span>Sign Out</span>
+          <LogOut size={16} />
+          {!collapsed && <span>Sign Out</span>}
         </button>
       </div>
     </aside>

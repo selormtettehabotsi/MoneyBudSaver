@@ -3,12 +3,31 @@ import { goalsApi } from "../api/goals";
 import { SavingsGoal } from "../types/finance";
 import { useCurrency } from "../context/CurrencyContext";
 import { useSync } from "../context/SyncContext";
+import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmDialogContext";
 import { Modal } from "../components/common/Modal";
-import { PlusCircle, Target, ArrowUpRight, ArrowDownLeft, Trash2, Edit2, AlertCircle } from "lucide-react";
+import { Button } from "../components/common/Button";
+import { EmptyState } from "../components/common/EmptyState";
+import { MoneyInput } from "../components/common/MoneyInput";
+import { Badge } from "../components/common/Badge";
+import {
+  Plus,
+  Target,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Trash2,
+  Edit2,
+  Calendar,
+  Sparkles,
+} from "lucide-react";
+import { Skeleton } from "../components/common/Skeleton";
 
 export const GoalsPage: React.FC = () => {
   const { formatMoney } = useCurrency();
   const { loadCachedOrFetch, isOnline } = useSync();
+  const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast();
+  const { confirm } = useConfirm();
+
   const [goals, setGoals] = useState<SavingsGoal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -21,13 +40,14 @@ export const GoalsPage: React.FC = () => {
   const [targetDate, setTargetDate] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Adjust Modal
+  // Deposit / Withdraw Modal
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [adjustingGoal, setAdjustingGoal] = useState<SavingsGoal | null>(null);
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustIsDeposit, setAdjustIsDeposit] = useState(true);
 
   const [modalError, setModalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const loadGoals = async () => {
     setLoading(true);
@@ -46,6 +66,10 @@ export const GoalsPage: React.FC = () => {
   }, []);
 
   const handleOpenCreate = () => {
+    if (!isOnline) {
+      toastWarning("Creating goals requires an active network connection.");
+      return;
+    }
     setEditingGoal(null);
     setTitle("");
     setTargetAmount("");
@@ -57,6 +81,10 @@ export const GoalsPage: React.FC = () => {
   };
 
   const handleOpenEdit = (g: SavingsGoal) => {
+    if (!isOnline) {
+      toastWarning("Editing goals requires an active network connection.");
+      return;
+    }
     setEditingGoal(g);
     setTitle(g.title);
     setTargetAmount(g.target_amount);
@@ -68,6 +96,10 @@ export const GoalsPage: React.FC = () => {
   };
 
   const handleOpenAdjust = (g: SavingsGoal, isDeposit: boolean) => {
+    if (!isOnline) {
+      toastWarning("Adjusting goal balances requires an active network connection.");
+      return;
+    }
     setAdjustingGoal(g);
     setAdjustIsDeposit(isDeposit);
     setAdjustAmount("");
@@ -76,275 +108,370 @@ export const GoalsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this savings goal?")) return;
+    if (!isOnline) {
+      toastWarning("Deleting goals requires an active network connection.");
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "Delete Savings Goal?",
+      message: "Are you sure you want to delete this savings goal? Stored progress records will be removed.",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+
+    if (!confirmed) return;
+
     try {
       await goalsApi.delete(id);
+      toastSuccess("Savings goal deleted.");
       loadGoals();
     } catch (err: any) {
-      alert(err.message || "Failed to delete goal.");
+      toastError(err.message || "Failed to delete goal.");
     }
   };
 
   const handleSaveGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
+
+    const targetNum = parseFloat(targetAmount);
+    if (!targetNum || isNaN(targetNum) || targetNum <= 0) {
+      setModalError("Please enter a valid target amount greater than zero.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       if (editingGoal) {
         await goalsApi.update(editingGoal.id, {
-          title,
+          title: title.trim(),
           target_amount: targetAmount,
-          current_amount: currentAmount,
+          current_amount: currentAmount || "0.00",
           target_date: targetDate || null,
-          notes,
+          notes: notes.trim() || undefined,
         });
+        toastSuccess("Savings goal updated.");
       } else {
         await goalsApi.create({
-          title,
+          title: title.trim(),
           target_amount: targetAmount,
-          current_amount: currentAmount,
+          current_amount: currentAmount || "0.00",
           target_date: targetDate || null,
-          notes,
+          notes: notes.trim() || undefined,
         });
+        toastSuccess("Savings goal created.");
       }
       setIsGoalModalOpen(false);
       loadGoals();
     } catch (err: any) {
       setModalError(err.message || "Failed to save goal.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleSaveAdjustment = async (e: React.FormEvent) => {
+  const handleSaveAdjust = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustingGoal) return;
     setModalError(null);
+
+    const val = parseFloat(adjustAmount);
+    if (!val || isNaN(val) || val <= 0) {
+      setModalError("Please enter a valid amount greater than zero.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const signedAmount = adjustIsDeposit
-        ? adjustAmount
-        : `-${adjustAmount}`;
-      await goalsApi.adjust(adjustingGoal.id, signedAmount);
+      const finalAmount = adjustIsDeposit ? adjustAmount : `-${adjustAmount}`;
+      await goalsApi.adjust(adjustingGoal.id, finalAmount, adjustIsDeposit ? "Deposit" : "Withdrawal");
+      toastSuccess(
+        `${adjustIsDeposit ? "Deposited" : "Withdrew"} ${formatMoney(adjustAmount)} ${
+          adjustIsDeposit ? "into" : "from"
+        } "${adjustingGoal.title}".`
+      );
       setIsAdjustModalOpen(false);
       loadGoals();
     } catch (err: any) {
       setModalError(err.message || "Failed to adjust balance.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  // Summaries
   const totalSaved = goals.reduce((acc, g) => acc + parseFloat(g.current_amount || "0"), 0);
   const totalTarget = goals.reduce((acc, g) => acc + parseFloat(g.target_amount || "0"), 0);
+  const combinedPct = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <h1 style={{ fontSize: "26px" }}>Savings Goals</h1>
-          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Track progress towards emergency funds and future milestones
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {!isOnline && (
-            <span className="badge badge-warning flex items-center gap-1" style={{ fontSize: "12px" }}>
-              <AlertCircle size={12} />
-              <span>Editing offline is disabled</span>
-            </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
+      {/* Summary Strip */}
+      <div
+        className="glass-panel"
+        style={{
+          padding: "18px 24px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "16px",
+        }}
+      >
+        <div style={{ display: "flex", gap: "24px", alignItems: "baseline", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+              Total Saved in Goals
+            </div>
+            <div className="tabular-nums" style={{ fontSize: "22px", fontWeight: 800, color: "var(--success)" }}>
+              {formatMoney(totalSaved)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
+              Combined Target
+            </div>
+            <div className="tabular-nums" style={{ fontSize: "18px", fontWeight: 700, color: "var(--text-primary)" }}>
+              {formatMoney(totalTarget)}
+            </div>
+          </div>
+          {totalTarget > 0 && (
+            <Badge variant="brand" size="md">
+              {combinedPct.toFixed(0)}% Overall Progress
+            </Badge>
           )}
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={!isOnline}
-            onClick={handleOpenCreate}
-            title={!isOnline ? "Creating goals requires an active connection" : undefined}
-          >
-            <PlusCircle size={15} />
-            <span>New Goal</span>
-          </button>
         </div>
+
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={handleOpenCreate}
+          icon={<Plus size={15} />}
+          disabled={!isOnline}
+        >
+          Create Goal
+        </Button>
       </div>
 
-      {/* Summary Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="glass-panel" style={{ padding: "16px 20px" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Total Saved in Goals</span>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--success)", marginTop: "4px" }}>
-            {formatMoney(totalSaved)}
-          </div>
+      {/* Goal Cards Grid */}
+      {loading && goals.length === 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          <Skeleton height="200px" borderRadius="var(--radius-lg)" />
+          <Skeleton height="200px" borderRadius="var(--radius-lg)" />
         </div>
+      ) : goals.length === 0 ? (
+        <EmptyState
+          icon={<Target size={28} />}
+          title="No savings goals created yet"
+          description="Build an emergency runway buffer or set up a milestone target like a home deposit or equipment purchase."
+          actionLabel="Create First Goal (e.g. Emergency Fund)"
+          onAction={handleOpenCreate}
+        />
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          {goals.map((g) => {
+            const savedNum = parseFloat(g.current_amount || "0");
+            const targetNum = parseFloat(g.target_amount || "0");
+            const pct = targetNum > 0 ? (savedNum / targetNum) * 100 : 0;
+            const isCompleted = pct >= 100;
 
-        <div className="glass-panel" style={{ padding: "16px 20px" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>Combined Target</span>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--text-primary)", marginTop: "4px" }}>
-            {formatMoney(totalTarget)}
-          </div>
-        </div>
-      </div>
-
-      {/* Goals Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {loading ? (
-          <div style={{ gridColumn: "1 / -1", padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Loading savings goals...
-          </div>
-        ) : goals.length === 0 ? (
-          <div
-            className="glass-panel"
-            style={{ gridColumn: "1 / -1", padding: "48px 24px", textAlign: "center", color: "var(--text-muted)" }}
-          >
-            No savings goals created yet. Click "New Goal" to get started!
-          </div>
-        ) : (
-          goals.map((g) => {
-            const isDone = g.is_completed || g.progress_percentage >= 100;
             return (
               <div
                 key={g.id}
-                className="glass-panel flex flex-col justify-between"
-                style={{ padding: "20px 22px", position: "relative" }}
+                className="glass-panel"
+                style={{
+                  padding: "20px 22px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  borderColor: isCompleted ? "var(--success-border)" : "var(--border-color)",
+                }}
               >
                 <div>
-                  <div className="flex items-center justify-between" style={{ marginBottom: "12px" }}>
-                    <div className="flex items-center gap-2">
-                      <Target size={18} style={{ color: "var(--accent-primary)" }} />
-                      <h3 style={{ fontSize: "16px" }}>{g.title}</h3>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div
+                        style={{
+                          width: "38px",
+                          height: "38px",
+                          borderRadius: "10px",
+                          background: isCompleted ? "var(--success-bg)" : "var(--accent-primary-glow)",
+                          color: isCompleted ? "var(--success)" : "var(--accent-primary)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isCompleted ? <Sparkles size={18} /> : <Target size={18} />}
+                      </div>
+                      <div>
+                        <h4 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>
+                          {g.title}
+                        </h4>
+                        {g.target_date && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                            <Calendar size={11} />
+                            <span>Target: {new Date(g.target_date).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <span className={`badge ${isDone ? "badge-success" : "badge-info"}`}>
-                      {isDone ? "Goal Achieved" : `${g.progress_percentage.toFixed(0)}% Saved`}
-                    </span>
+                    <Badge variant={isCompleted ? "success" : "neutral"} size="sm">
+                      {isCompleted ? "Goal Achieved!" : `${pct.toFixed(0)}% Saved`}
+                    </Badge>
                   </div>
 
                   {g.notes && (
-                    <p style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px" }}>{g.notes}</p>
+                    <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "12px", lineHeight: 1.4 }}>
+                      {g.notes}
+                    </p>
                   )}
 
-                  {/* Progress Bar */}
-                  <div className="progress-bar-bg" style={{ height: "10px", margin: "14px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+                    <span className="tabular-nums" style={{ fontSize: "19px", fontWeight: 800, color: isCompleted ? "var(--success)" : "var(--text-primary)" }}>
+                      {formatMoney(savedNum)}
+                    </span>
+                    <span className="tabular-nums" style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                      Target: {formatMoney(targetNum)}
+                    </span>
+                  </div>
+
+                  <div className="progress-bar-bg" style={{ height: "8px" }}>
                     <div
                       className="progress-bar-fill"
                       style={{
-                        width: `${Math.min(100, g.progress_percentage)}%`,
-                        background: isDone
-                          ? "linear-gradient(90deg, #10b981 0%, #06b6d4 100%)"
-                          : "linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)",
+                        width: `${Math.min(100, Math.max(1, pct))}%`,
+                        background: isCompleted
+                          ? "linear-gradient(90deg, #10b981 0%, #059669 100%)"
+                          : "var(--accent-primary)",
                       }}
                     />
                   </div>
-
-                  {/* Amount Breakdown */}
-                  <div className="flex items-center justify-between tabular-nums" style={{ fontSize: "0.8125rem" }}>
-                    <div>
-                      <span style={{ color: "var(--text-muted)" }}>Saved: </span>
-                      <strong style={{ color: "var(--success)" }}>{formatMoney(g.current_amount)}</strong>
-                    </div>
-                    <div>
-                      <span style={{ color: "var(--text-muted)" }}>Target: </span>
-                      <strong style={{ color: "var(--text-primary)" }}>{formatMoney(g.target_amount)}</strong>
-                    </div>
-                  </div>
                 </div>
 
-                {/* Actions */}
                 <div
-                  className="flex items-center justify-between"
-                  style={{ borderTop: "1px solid var(--border-color)", paddingTop: "14px", marginTop: "16px", flexWrap: "wrap", gap: "8px" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    borderTop: "1px solid var(--border-color)",
+                    paddingTop: "12px",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                  }}
                 >
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="btn btn-success btn-sm"
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => handleOpenAdjust(g, true)}
-                      style={{ minHeight: "44px" }}
+                      icon={<ArrowUpRight size={14} style={{ color: "var(--success)" }} />}
+                      disabled={!isOnline}
                     >
-                      <ArrowUpRight size={16} />
-                      <span>Deposit</span>
-                    </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
+                      Deposit
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => handleOpenAdjust(g, false)}
-                      style={{ minHeight: "44px" }}
+                      icon={<ArrowDownLeft size={14} style={{ color: "var(--warning)" }} />}
+                      disabled={!isOnline || savedNum <= 0}
                     >
-                      <ArrowDownLeft size={16} />
-                      <span>Withdraw</span>
-                    </button>
+                      Withdraw
+                    </Button>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div style={{ display: "flex", gap: "4px" }}>
                     <button
+                      type="button"
                       onClick={() => handleOpenEdit(g)}
-                      className="btn-icon"
-                      title="Edit Goal"
                       aria-label="Edit Goal"
+                      disabled={!isOnline}
+                      className="btn-icon"
+                      style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px" }}
                     >
-                      <Edit2 size={18} />
+                      <Edit2 size={14} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleDelete(g.id)}
-                      className="btn-icon"
-                      style={{ color: "var(--danger)" }}
-                      title="Delete Goal"
                       aria-label="Delete Goal"
+                      disabled={!isOnline}
+                      className="btn-icon"
+                      style={{ width: "32px", height: "32px", minWidth: "32px", minHeight: "32px", color: "var(--danger)" }}
                     >
-                      <Trash2 size={18} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
       {/* Create / Edit Goal Modal */}
       <Modal
         isOpen={isGoalModalOpen}
         onClose={() => setIsGoalModalOpen(false)}
-        title={editingGoal ? "Edit Savings Goal" : "Create Savings Goal"}
+        title={editingGoal ? "Edit Savings Goal" : "Create New Savings Goal"}
       >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSaveGoal} className="flex flex-col gap-4">
+        <form onSubmit={handleSaveGoal} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
+
           <div className="input-group">
             <label className="input-label">Goal Title</label>
             <input
               type="text"
               required
-              placeholder="e.g. Emergency Fund (6 Months)"
               className="input-field"
+              placeholder="e.g. Emergency Fund (6 Months), New Laptop"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              autoFocus
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="input-group">
-              <label className="input-label">Target Amount</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                required
-                placeholder="0.00"
-                className="input-field"
-                value={targetAmount}
-                onChange={(e) => setTargetAmount(e.target.value)}
-              />
-            </div>
+          <MoneyInput
+            label="Target Amount"
+            value={targetAmount}
+            onChange={(val) => setTargetAmount(val)}
+            placeholder="5000.00"
+            required
+          />
 
-            <div className="input-group">
-              <label className="input-label">Initial Saved Amount</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                className="input-field"
-                value={currentAmount}
-                onChange={(e) => setCurrentAmount(e.target.value)}
-              />
-            </div>
-          </div>
+          {!editingGoal && (
+            <MoneyInput
+              label="Initial Amount Saved"
+              value={currentAmount}
+              onChange={(val) => setCurrentAmount(val)}
+              placeholder="0.00"
+            />
+          )}
 
           <div className="input-group">
             <label className="input-label">Target Completion Date (Optional)</label>
@@ -359,59 +486,74 @@ export const GoalsPage: React.FC = () => {
           <div className="input-group">
             <label className="input-label">Notes (Optional)</label>
             <textarea
-              rows={2}
               className="input-field"
-              placeholder="Why this goal matters..."
+              placeholder="Purpose, account location, or motivation"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              style={{ minHeight: "64px" }}
             />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }}>
-            {editingGoal ? "Save Goal" : "Create Goal"}
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsGoalModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={submitting}>
+              {editingGoal ? "Save Changes" : "Create Goal"}
+            </Button>
+          </div>
         </form>
       </Modal>
 
-      {/* Adjust Balance Modal */}
+      {/* Deposit / Withdraw Modal */}
       <Modal
         isOpen={isAdjustModalOpen}
         onClose={() => setIsAdjustModalOpen(false)}
-        title={adjustIsDeposit ? "Deposit Funds to Goal" : "Withdraw Funds from Goal"}
+        title={adjustIsDeposit ? `Deposit to "${adjustingGoal?.title}"` : `Withdraw from "${adjustingGoal?.title}"`}
       >
-        {modalError && (
-          <div className="badge-danger" style={{ padding: "8px 12px", marginBottom: "14px", borderRadius: "var(--radius-sm)" }}>
-            {modalError}
-          </div>
-        )}
-        <form onSubmit={handleSaveAdjustment} className="flex flex-col gap-4">
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Target: <strong>{adjustingGoal?.title}</strong> (Current balance: {formatMoney(adjustingGoal?.current_amount)})
-          </p>
+        <form onSubmit={handleSaveAdjust} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {modalError && (
+            <div className="badge badge-danger" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
+              {modalError}
+            </div>
+          )}
 
-          <div className="input-group">
-            <label className="input-label">
-              {adjustIsDeposit ? "Deposit Amount" : "Withdrawal Amount"}
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              required
-              placeholder="0.00"
-              className="input-field"
-              value={adjustAmount}
-              onChange={(e) => setAdjustAmount(e.target.value)}
-            />
-          </div>
-
-          <button
-            type="submit"
-            className={`btn ${adjustIsDeposit ? "btn-success" : "btn-danger"}`}
-            style={{ marginTop: "10px" }}
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "var(--bg-surface-solid)",
+              borderRadius: "var(--radius-sm)",
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "13px",
+            }}
           >
-            {adjustIsDeposit ? "Confirm Deposit" : "Confirm Withdrawal"}
-          </button>
+            <span style={{ color: "var(--text-secondary)" }}>Current Saved Balance:</span>
+            <strong className="tabular-nums">{formatMoney(adjustingGoal?.current_amount || "0")}</strong>
+          </div>
+
+          <MoneyInput
+            label={adjustIsDeposit ? "Deposit Amount" : "Withdraw Amount"}
+            value={adjustAmount}
+            onChange={(val) => setAdjustAmount(val)}
+            placeholder="100.00"
+            required
+            autoFocus
+          />
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
+            <Button type="button" variant="secondary" onClick={() => setIsAdjustModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant={adjustIsDeposit ? "primary" : "secondary"}
+              loading={submitting}
+            >
+              {adjustIsDeposit ? "Confirm Deposit" : "Confirm Withdrawal"}
+            </Button>
+          </div>
         </form>
       </Modal>
     </div>

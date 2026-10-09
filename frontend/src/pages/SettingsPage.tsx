@@ -1,49 +1,62 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
 import { usePinLock } from "../context/PinLockContext";
 import { useSync } from "../context/SyncContext";
 import { useServerStatus } from "../context/ServerStatusContext";
+import { useTheme } from "../context/ThemeContext";
+import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmDialogContext";
 import {
-  Server,
   Globe,
   Shield,
-  Key,
-  Check,
-  CheckCircle2,
-  XCircle,
-  Info,
-  Download,
-  Upload,
-  Database,
-  FileSpreadsheet,
-  AlertCircle,
-  RefreshCw,
-  Layers,
   Lock,
   Unlock,
   KeyRound,
+  Cpu,
+  Database,
+  Server,
+  Check,
+  AlertCircle,
+  RefreshCw,
   Eye,
   EyeOff,
+  Sun,
+  Moon,
+  ArrowRight,
+  Download,
+  Wifi,
+  WifiOff,
+  Activity,
 } from "lucide-react";
 import {
   downloadTransactionsCsv,
   downloadBudgetsCsv,
   downloadDebtsCsv,
   downloadFullBackupJson,
-  importTransactionsCsv,
-  restoreFullBackupJson,
-  ImportCsvResponse,
-  RestoreBackupResponse,
 } from "../api/data";
 import { authApi } from "../api/auth";
 import { AIModelsManager } from "../components/council/AIModelsManager";
+import { PageHeader } from "../components/common/PageHeader";
+import { Card } from "../components/common/Card";
+import { Badge } from "../components/common/Badge";
+import { Button } from "../components/common/Button";
+
+type SettingsTab = "general" | "guardrails" | "security" | "models" | "data" | "status";
 
 export const SettingsPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
   const { user, updateSettings } = useAuth();
   const { currency, setCurrency } = useCurrency();
-  const { isPinSet, encryptOffline, autoLockMinutes, setupPin, removePin, lockNow } = usePinLock();
-  const { isOnline } = useSync();
+  const { isPinSet, autoLockMinutes, setupPin, removePin, lockNow } = usePinLock();
+  const { isOnline, syncStatus, outboxItems, triggerSync } = useSync();
+  const { theme, toggleTheme } = useTheme();
+  const toast = useToast();
+  const { confirm } = useConfirm();
+
   const {
     isWarming,
     retryCount,
@@ -53,23 +66,36 @@ export const SettingsPage: React.FC = () => {
     latencyMs,
     isChecking,
     checkBackendHealth,
-    dismissError,
   } = useServerStatus();
 
+  // Tab State
+  const tabFromUrl = searchParams.get("tab") as SettingsTab | null;
+  const [activeTab, setActiveTab] = useState<SettingsTab>(tabFromUrl || "general");
+
+  useEffect(() => {
+    if (tabFromUrl && tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [tabFromUrl]);
+
+  const handleTabChange = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
+
+  // General & Guardrails State
   const [selectedCurrency, setSelectedCurrency] = useState(user?.currency || currency);
   const [maxDti, setMaxDti] = useState<number>(user?.settings?.max_dti_ratio || 40.0);
   const [minRunway, setMinRunway] = useState<number>(user?.settings?.min_runway_months || 3.0);
-  const [savedSuccess, setSavedSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [generalLoading, setGeneralLoading] = useState(false);
+  const [guardrailLoading, setGuardrailLoading] = useState(false);
 
   // Security / PIN State
   const [pinInput, setPinInput] = useState("");
   const [confirmPinInput, setConfirmPinInput] = useState("");
   const [showPinText, setShowPinText] = useState(false);
   const [selectedAutoLock, setSelectedAutoLock] = useState<number>(autoLockMinutes || 5);
-  const [encryptDataCheck, setEncryptDataCheck] = useState<boolean>(encryptOffline || false);
   const [pinError, setPinError] = useState<string | null>(null);
-  const [pinSuccess, setPinSuccess] = useState<string | null>(null);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
 
   // Change Password State
@@ -80,88 +106,47 @@ export const SettingsPage: React.FC = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
-  // CSV Import State
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [createMissingCats, setCreateMissingCats] = useState(true);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const [csvResult, setCsvResult] = useState<ImportCsvResponse | null>(null);
-  const [csvError, setCsvError] = useState<string | null>(null);
-  const csvInputRef = useRef<HTMLInputElement>(null);
-
-  // JSON Restore State
-  const [jsonFile, setJsonFile] = useState<File | null>(null);
-  const [overwriteRestore, setOverwriteRestore] = useState(false);
-  const [jsonRestoring, setJsonRestoring] = useState(false);
-  const [restoreResult, setRestoreResult] = useState<RestoreBackupResponse | null>(null);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
-  const jsonInputRef = useRef<HTMLInputElement>(null);
-
-  const handleSave = async (e: React.FormEvent) => {
+  // Save General Preferences
+  const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setSavedSuccess(false);
+    setGeneralLoading(true);
     try {
       await updateSettings(selectedCurrency, {
         max_dti_ratio: maxDti,
         min_runway_months: minRunway,
       });
       setCurrency(selectedCurrency);
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+      toast.success("General preferences updated successfully!");
     } catch (err: any) {
-      alert(err.message || "Failed to update settings.");
+      toast.error(err.message || "Failed to update preferences.");
     } finally {
-      setLoading(false);
+      setGeneralLoading(false);
     }
   };
 
-  const handleCsvImport = async () => {
-    if (!csvFile) return;
-    setCsvImporting(true);
-    setCsvError(null);
-    setCsvResult(null);
+  // Save Financial Guardrails
+  const handleSaveGuardrails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGuardrailLoading(true);
     try {
-      const res = await importTransactionsCsv(csvFile, createMissingCats);
-      setCsvResult(res);
-      setCsvFile(null);
-      if (csvInputRef.current) csvInputRef.current.value = "";
+      await updateSettings(currency, {
+        max_dti_ratio: maxDti,
+        min_runway_months: minRunway,
+      });
+      toast.success("Financial guardrails saved successfully!");
     } catch (err: any) {
-      setCsvError(err.message || "Failed to import CSV statement.");
+      toast.error(err.message || "Failed to update guardrails.");
     } finally {
-      setCsvImporting(false);
+      setGuardrailLoading(false);
     }
   };
 
-  const handleJsonRestore = async () => {
-    if (!jsonFile) return;
-    if (overwriteRestore) {
-      const confirmed = window.confirm(
-        "WARNING: You have selected 'Overwrite Existing Data'. This will completely replace your current transactions, budgets, debts, goals, and council records with the backup file. Proceed?"
-      );
-      if (!confirmed) return;
-    }
-    setJsonRestoring(true);
-    setRestoreError(null);
-    setRestoreResult(null);
-    try {
-      const res = await restoreFullBackupJson(jsonFile, overwriteRestore);
-      setRestoreResult(res);
-      setJsonFile(null);
-      if (jsonInputRef.current) jsonInputRef.current.value = "";
-    } catch (err: any) {
-      setRestoreError(err.message || "Failed to restore database from backup.");
-    } finally {
-      setJsonRestoring(false);
-    }
-  };
-
+  // Save PIN Configuration
   const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     setPinError(null);
-    setPinSuccess(null);
 
     if (pinInput.length < 4 || pinInput.length > 8) {
       setPinError("PIN must be between 4 and 8 digits.");
@@ -174,33 +159,41 @@ export const SettingsPage: React.FC = () => {
     }
 
     try {
-      await setupPin(pinInput, encryptDataCheck, selectedAutoLock);
-      setPinSuccess(isPinSet ? "PIN and security settings updated successfully!" : "App PIN Lock configured successfully!");
+      await setupPin(pinInput, false, selectedAutoLock);
+      toast.success(isPinSet ? "PIN and auto-lock settings updated!" : "App PIN Lock enabled successfully!");
       setPinInput("");
       setConfirmPinInput("");
       setIsChangingPin(false);
-      setTimeout(() => setPinSuccess(null), 4000);
     } catch (err: any) {
-      setPinError(err.message || "Failed to set PIN.");
+      setPinError(err.message || "Failed to configure PIN.");
+      toast.error(err.message || "Failed to configure PIN.");
     }
   };
 
+  // Remove PIN Lock
   const handleRemovePin = async () => {
-    if (!window.confirm("Are you sure you want to disable PIN Lock and local data encryption?")) return;
+    const proceed = await confirm({
+      title: "Disable PIN Lock?",
+      message: "Are you sure you want to disable PIN Lock? Your session will no longer require a PIN upon idle timeout.",
+      confirmText: "Disable PIN",
+      cancelText: "Keep PIN",
+      isDanger: true,
+    });
+    if (!proceed) return;
+
     try {
       await removePin();
-      setPinSuccess("PIN Lock removed.");
+      toast.success("PIN Lock disabled.");
       setIsChangingPin(false);
-      setTimeout(() => setPinSuccess(null), 3000);
     } catch (err: any) {
-      setPinError(err.message || "Failed to remove PIN.");
+      toast.error(err.message || "Failed to remove PIN.");
     }
   };
 
+  // Change Password
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
-    setPasswordSuccess(null);
 
     if (!currentPassword) {
       setPasswordError("Please enter your current password.");
@@ -220,897 +213,869 @@ export const SettingsPage: React.FC = () => {
     setPasswordLoading(true);
     try {
       const res = await authApi.changePassword(currentPassword, newPassword);
-      setPasswordSuccess(res.message || "Password changed successfully! Other active sessions were invalidated.");
-      // Clear password fields immediately
+      toast.success(res.message || "Password changed successfully! Other active sessions were invalidated.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setTimeout(() => setPasswordSuccess(null), 5000);
     } catch (err: any) {
-      setPasswordError(err.message || "Failed to change password. Please check your current password.");
+      const msg = err.message || "Failed to change password. Please check your current password.";
+      setPasswordError(msg);
+      toast.error(msg);
     } finally {
       setPasswordLoading(false);
     }
   };
 
+  // Nav Items definition
+  const navTabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
+    { id: "general", label: "General & Display", icon: Globe },
+    { id: "guardrails", label: "Financial Guardrails", icon: Shield },
+    { id: "security", label: "Security & PIN", icon: Lock },
+    { id: "models", label: "AI Models & Council", icon: Cpu },
+    { id: "data", label: "Data & Backups", icon: Database },
+    { id: "status", label: "System Status", icon: Server },
+  ];
+
   return (
-    <div className="flex flex-col gap-6" style={{ maxWidth: "860px", width: "100%" }}>
-      <div>
-        <h1 style={{ fontSize: "26px" }}>Settings & Data Management</h1>
-        <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-          Configure server health, currencies, financial guardrails, backups, and AI model providers
-        </span>
-      </div>
+    <div className="flex flex-col gap-6" style={{ width: "100%", maxWidth: "100%" }}>
+      {/* Page Header */}
+      <PageHeader
+        title="Settings & System Management"
+        subtitle="Manage your profile, currencies, financial guardrails, security lock, AI voters, and cloud health."
+      />
 
-      {/* Backend & Server Connection Health Card */}
-      <div
-        className="glass-panel"
-        style={{
-          padding: "20px 24px",
-          border:
-            serverStatus === "error" || lastError
-              ? "1px solid var(--danger-border)"
-              : isWarming
-              ? "1px solid var(--warning-border)"
-              : "1px solid var(--border-color)",
-          background:
-            serverStatus === "error" || lastError
-              ? "rgba(244, 63, 94, 0.04)"
-              : isWarming
-              ? "rgba(245, 158, 11, 0.04)"
-              : "var(--bg-surface)",
-        }}
-      >
-        <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: "12px", marginBottom: "12px" }}>
-          <div className="flex items-center gap-2.5">
-            <Server size={20} style={{ color: "var(--accent-primary)" }} />
-            <h3 style={{ fontSize: "17px" }}>MoneyCouncil Backend & Server Health</h3>
-          </div>
-
-          <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-            {isWarming ? (
-              <span className="badge badge-warning flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
-                <RefreshCw size={13} className="animate-spin" />
-                <span>Waking Up Backend... {retryCount > 0 ? `(Attempt ${retryCount}/3)` : ""}</span>
-              </span>
-            ) : serverStatus === "operational" && !lastError ? (
-              <span className="badge badge-success flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
-                <CheckCircle2 size={13} />
-                <span>Operational & Connected</span>
-              </span>
-            ) : (
-              <span className="badge badge-danger flex items-center gap-1.5" style={{ fontSize: "12px", padding: "4px 10px" }}>
-                <AlertCircle size={13} />
-                <span>Connection Issue Detected</span>
-              </span>
-            )}
-
-            <button
-              type="button"
-              disabled={isChecking}
-              onClick={checkBackendHealth}
-              className="btn btn-secondary btn-sm flex items-center gap-1.5"
-              style={{ minHeight: "36px", padding: "6px 12px", fontSize: "12px" }}
-              title="Ping backend server and measure latency"
-            >
-              <RefreshCw size={13} className={isChecking ? "animate-spin" : ""} />
-              <span>{isChecking ? "Pinging..." : "Check Health"}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Diagnostic Details */}
-        <div className="flex items-center justify-between" style={{ fontSize: "12px", color: "var(--text-secondary)", flexWrap: "wrap", gap: "8px" }}>
-          <div>
-            <span>Backend Status: </span>
-            <strong style={{ color: "var(--text-primary)" }}>
-              {isWarming
-                ? `Warming up from idle (${retryCount > 0 ? `Attempt ${retryCount} of 3` : "Connecting..."})`
-                : serverStatus === "operational" && !lastError
-                ? "Active & Ready"
-                : "Server Unreachable"}
-            </strong>
-            {latencyMs !== null && serverStatus === "operational" && !lastError && (
-              <span style={{ marginLeft: "6px", color: "var(--accent-secondary)" }}>
-                • Latency: <strong>{latencyMs}ms</strong>
-              </span>
-            )}
-          </div>
-
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-            Last checked: {lastChecked ? lastChecked.toLocaleTimeString() : "Pending"}
-          </div>
-        </div>
-
-        {/* Server Alert Banner if Problem Occurs */}
-        {(lastError || serverStatus === "error") && (
-          <div
-            className="badge-danger flex items-start justify-between gap-3"
-            style={{
-              marginTop: "14px",
-              padding: "12px 16px",
-              borderRadius: "var(--radius-md)",
-              fontSize: "12px",
-              lineHeight: 1.5,
-              flexWrap: "wrap",
-            }}
-          >
-            <div className="flex items-start gap-2.5" style={{ flex: 1, minWidth: "220px" }}>
-              <AlertCircle size={18} className="text-rose-400" style={{ flexShrink: 0, marginTop: "2px" }} />
-              <div>
-                <strong style={{ fontSize: "13px" }}>Server Connection Alert:</strong>
-                <p style={{ margin: "3px 0 0 0" }}>
-                  {lastError || "The web app was unable to reach the MoneyCouncil backend server after multiple attempts."}
-                </p>
-                <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: "11px" }}>
-                  Troubleshooting: If your backend is hosted on Render or cloud hosting, it may take 30-50 seconds to complete cold-start boot. Check your internet connection or cloud dashboard.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2" style={{ alignSelf: "flex-end", marginTop: "4px" }}>
-              <button
-                type="button"
-                onClick={checkBackendHealth}
-                className="btn btn-secondary btn-sm"
-                style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
-              >
-                <RefreshCw size={12} className={isChecking ? "animate-spin" : ""} />
-                <span>Retry Connection</span>
-              </button>
-              <button
-                type="button"
-                onClick={dismissError}
-                className="btn btn-ghost btn-sm"
-                style={{ minHeight: "32px", padding: "4px 8px", fontSize: "11px", color: "var(--text-muted)" }}
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {savedSuccess && (
-        <div className="badge-success flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)" }}>
-          <Check size={16} />
-          <span>Settings successfully saved and updated!</span>
-        </div>
-      )}
-
-      <form onSubmit={handleSave} className="flex flex-col gap-6">
-        {/* 1. Currency & Display */}
-        <div className="glass-panel" style={{ padding: "24px" }}>
-          <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-            <Globe size={20} style={{ color: "var(--accent-primary)" }} />
-            <h3 style={{ fontSize: "17px" }}>Currency & Display</h3>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Active Currency</label>
+      {/* Main Settings Layout: Sub-Nav on desktop, Tabs on mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+        {/* Sub-Nav Sidebar */}
+        <div
+          className="glass-panel col-span-1"
+          style={{
+            padding: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            position: "sticky",
+            top: "84px",
+          }}
+        >
+          {/* Mobile Tab Selector (shown only on mobile) */}
+          <div className="lg:hidden" style={{ width: "100%", marginBottom: "8px" }}>
+            <label className="input-label" style={{ marginBottom: "6px" }}>Settings Category</label>
             <select
               className="input-field"
-              value={selectedCurrency}
-              onChange={(e) => setSelectedCurrency(e.target.value)}
+              value={activeTab}
+              onChange={(e) => handleTabChange(e.target.value as SettingsTab)}
+              style={{ minHeight: "44px", width: "100%" }}
             >
-              <option value="GHS">GHS (GH₵) - Ghana Cedi (Default)</option>
-              <option value="USD">USD ($) - United States Dollar</option>
-              <option value="EUR">EUR (€) - Euro</option>
-              <option value="GBP">GBP (£) - British Pound Sterling</option>
-              <option value="NGN">NGN (₦) - Nigerian Naira</option>
-              <option value="KES">KES (KSh) - Kenyan Shilling</option>
-              <option value="ZAR">ZAR (R) - South African Rand</option>
-              <option value="CAD">CAD (CA$) - Canadian Dollar</option>
-              <option value="AUD">AUD (A$) - Australian Dollar</option>
-              <option value="INR">INR (₹) - Indian Rupee</option>
+              {navTabs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
             </select>
           </div>
-        </div>
 
-        {/* 2. Hard Financial Guardrails */}
-        <div className="glass-panel" style={{ padding: "24px" }}>
-          <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-            <Shield size={20} style={{ color: "var(--accent-secondary)" }} />
-            <h3 style={{ fontSize: "17px" }}>Hard Financial Guardrails</h3>
-          </div>
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-            If a proposed purchase exceeds your Max DTI or reduces your runway below the Minimum Runway threshold, the Council triggers a prominent red guardrail warning regardless of model votes.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="input-group">
-              <label className="input-label">Max Debt-to-Income Ratio (% DTI)</label>
-              <input
-                type="number"
-                step="1"
-                min="10"
-                max="80"
-                className="input-field"
-                value={maxDti}
-                onChange={(e) => setMaxDti(parseFloat(e.target.value) || 40.0)}
-              />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Recommended standard: 35% - 40%</span>
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Minimum Safe Runway (Months)</label>
-              <input
-                type="number"
-                step="0.5"
-                min="1"
-                max="24"
-                className="input-field"
-                value={minRunway}
-                onChange={(e) => setMinRunway(parseFloat(e.target.value) || 3.0)}
-              />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Recommended emergency fund: 3.0 - 6.0 months</span>
-            </div>
-          </div>
-        </div>
-
-        <button type="submit" disabled={loading} className="btn btn-primary" style={{ alignSelf: "flex-start", minHeight: "44px" }}>
-          <span>{loading ? "Saving Settings..." : "Save Preferences"}</span>
-        </button>
-
-      </form>
-
-      {/* 2.5. App Security, PIN Lock & Offline Data Encryption */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
-          <div className="flex items-center gap-2">
-            <Lock size={20} style={{ color: "var(--accent-primary)" }} />
-            <h3 style={{ fontSize: "17px" }}>App Security & Local PIN Lock</h3>
-          </div>
-          {isPinSet && (
-            <span className="badge badge-success flex items-center gap-1">
-              <Check size={12} />
-              <span>PIN Protection Active</span>
-            </span>
-          )}
-        </div>
-
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          Protect your sensitive financial data behind a local PIN lock and derive a 256-bit AES-GCM key via Web Crypto to encrypt IndexedDB records on this device.
-        </p>
-
-        {pinSuccess && (
-          <div className="badge-success flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}>
-            <Check size={16} />
-            <span>{pinSuccess}</span>
-          </div>
-        )}
-
-        {pinError && (
-          <div className="badge-danger flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}>
-            <AlertCircle size={16} />
-            <span>{pinError}</span>
-          </div>
-        )}
-
-        {isPinSet && !isChangingPin ? (
-          <div className="flex flex-col gap-4">
-            <div
-              style={{
-                padding: "16px",
-                borderRadius: "var(--radius-md)",
-                background: "var(--bg-surface-solid)",
-                border: "1px solid var(--border-color)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-              }}
-            >
-              <div className="flex items-center justify-between" style={{ fontSize: "13px" }}>
-                <span style={{ color: "var(--text-secondary)" }}>Auto-lock Idle Timeout:</span>
-                <strong>{autoLockMinutes} minutes</strong>
-              </div>
-              <div className="flex items-center justify-between" style={{ fontSize: "13px" }}>
-                <span style={{ color: "var(--text-secondary)" }}>Offline Data Encryption (AES-GCM):</span>
-                <strong style={{ color: encryptOffline ? "var(--success)" : "var(--text-muted)" }}>
-                  {encryptOffline ? "Enabled (PBKDF2 + AES-GCM)" : "Disabled (Standard IndexedDB)"}
-                </strong>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={lockNow}
-                className="btn btn-secondary flex items-center gap-2"
-                style={{ minHeight: "44px" }}
-              >
-                <Lock size={16} />
-                <span>Lock App Now</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsChangingPin(true);
-                  setPinInput("");
-                  setConfirmPinInput("");
-                  setPinError(null);
-                }}
-                className="btn btn-secondary flex items-center gap-2"
-                style={{ minHeight: "44px" }}
-              >
-                <KeyRound size={16} />
-                <span>Change PIN or Auto-Lock</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRemovePin}
-                className="btn btn-danger flex items-center gap-2"
-                style={{ minHeight: "44px" }}
-              >
-                <Unlock size={16} />
-                <span>Disable PIN Lock</span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSavePin} className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="input-group">
-                <label className="input-label">Set 4-8 Digit PIN</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showPinText ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={8}
-                    required
-                    placeholder="Enter PIN (e.g. 1234)"
-                    className="input-field"
-                    style={{ paddingRight: "40px", minHeight: "44px" }}
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPinText(!showPinText)}
-                    style={{
-                      position: "absolute",
-                      right: "10px",
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      background: "none",
-                      border: "none",
-                      color: "var(--text-muted)",
-                      cursor: "pointer",
-                      padding: "4px",
-                    }}
-                  >
-                    {showPinText ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="input-group">
-                <label className="input-label">Confirm PIN</label>
-                <input
-                  type={showPinText ? "text" : "password"}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={8}
-                  required
-                  placeholder="Re-enter PIN"
-                  className="input-field"
-                  style={{ minHeight: "44px" }}
-                  value={confirmPinInput}
-                  onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, ""))}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="input-group">
-                <label className="input-label">Auto-Lock Idle Timeout</label>
-                <select
-                  className="input-field"
-                  style={{ minHeight: "44px" }}
-                  value={selectedAutoLock}
-                  onChange={(e) => setSelectedAutoLock(parseInt(e.target.value) || 5)}
+          {/* Desktop Nav Items */}
+          <div className="hidden lg:flex flex-col gap-1">
+            {navTabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleTabChange(tab.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "10px 14px",
+                    borderRadius: "var(--radius-md)",
+                    border: "none",
+                    background: isActive ? "var(--accent-primary-glow)" : "transparent",
+                    color: isActive ? "var(--accent-primary)" : "var(--text-secondary)",
+                    fontWeight: isActive ? 600 : 500,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s ease",
+                    minHeight: "42px",
+                  }}
                 >
-                  <option value={1}>1 Minute</option>
-                  <option value={2}>2 Minutes</option>
-                  <option value={5}>5 Minutes (Default)</option>
-                  <option value={15}>15 Minutes</option>
-                  <option value={30}>30 Minutes</option>
-                </select>
-              </div>
+                  <Icon size={17} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{tab.label}</span>
+                  {tab.id === "security" && isPinSet && (
+                    <span
+                      style={{
+                        width: "7px",
+                        height: "7px",
+                        borderRadius: "50%",
+                        background: "var(--success)",
+                      }}
+                      title="PIN Lock Active"
+                    />
+                  )}
+                  {tab.id === "status" && (serverStatus === "error" || lastError) && (
+                    <span
+                      style={{
+                        width: "7px",
+                        height: "7px",
+                        borderRadius: "50%",
+                        background: "var(--danger)",
+                      }}
+                      title="Server Warning"
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-              <div className="flex flex-col justify-center">
-                <label className="flex items-start gap-2" style={{ cursor: "pointer", fontSize: "13px" }}>
-                  <input
-                    type="checkbox"
-                    checked={encryptDataCheck}
-                    onChange={(e) => setEncryptDataCheck(e.target.checked)}
-                    style={{ marginTop: "3px", width: "16px", height: "16px" }}
-                  />
-                  <div>
-                    <strong style={{ color: "var(--text-primary)" }}>Encrypt Offline Data (AES-GCM)</strong>
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                      Derives cryptographic encryption keys from your PIN using Web Crypto.
+        {/* Tab Content Pane */}
+        <div className="col-span-1 lg:col-span-3 flex flex-col gap-6">
+          {/* TAB 1: GENERAL & DISPLAY */}
+          {activeTab === "general" && (
+            <div className="flex flex-col gap-6">
+              {/* User Account Profile Card */}
+              <Card title="Account Profile" subtitle="Your MoneyCouncil profile and local sync credentials.">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      style={{
+                        width: "48px",
+                        height: "48px",
+                        borderRadius: "50%",
+                        background: "linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-purple) 100%)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#ffffff",
+                        fontWeight: 700,
+                        fontSize: "18px",
+                      }}
+                    >
+                      {user?.email?.charAt(0).toUpperCase() || "M"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "16px", color: "var(--text-primary)" }}>
+                        {user?.email || "Signed In"}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="info">Primary Owner</Badge>
+                        <Badge variant={isOnline ? "success" : "warning"}>
+                          {isOnline ? "Cloud Connected" : "Local Offline Mode"}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
-                </label>
-              </div>
-            </div>
 
-            <div
-              style={{
-                padding: "12px 14px",
-                borderRadius: "var(--radius-sm)",
-                background: "rgba(99, 102, 241, 0.08)",
-                border: "1px solid rgba(99, 102, 241, 0.2)",
-                fontSize: "12px",
-                color: "var(--text-secondary)",
-              }}
-            >
-              <strong>Note:</strong> Your PIN is hashed locally using PBKDF2 (100,000 iterations) and never sent to any server. If you forget your PIN, you can log in again online to re-sync your cloud financial data.
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button type="submit" className="btn btn-primary" style={{ minHeight: "44px" }}>
-                <span>{isPinSet ? "Update Security Settings" : "Enable PIN Lock"}</span>
-              </button>
-
-              {isPinSet && isChangingPin && (
-                <button
-                  type="button"
-                  onClick={() => setIsChangingPin(false)}
-                  className="btn btn-secondary"
-                  style={{ minHeight: "44px" }}
-                >
-                  <span>Cancel</span>
-                </button>
-              )}
-            </div>
-          </form>
-        )}
-      </div>
-
-      {/* 2.6. Account Password Security */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-          <Key size={20} style={{ color: "var(--accent-primary)" }} />
-          <h3 style={{ fontSize: "17px" }}>Change Account Password</h3>
-        </div>
-
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          Update your login password. Changing your password invalidates all other active login sessions for safety.
-        </p>
-
-        {passwordSuccess && (
-          <div
-            className="badge-success flex items-center gap-2"
-            style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}
-          >
-            <CheckCircle2 size={16} className="text-emerald-400" />
-            <span>{passwordSuccess}</span>
-          </div>
-        )}
-
-        {passwordError && (
-          <div
-            className="badge-danger flex items-center gap-2"
-            style={{ padding: "12px 16px", borderRadius: "var(--radius-md)", marginBottom: "16px" }}
-          >
-            <XCircle size={16} className="text-rose-400" />
-            <span>{passwordError}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
-          <div className="input-group">
-            <label className="input-label">Current Password</label>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <input
-                type={showCurrentPassword ? "text" : "password"}
-                required
-                className="input-field"
-                style={{ paddingRight: "40px" }}
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Enter current password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                style={{
-                  position: "absolute",
-                  right: "12px",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-muted)",
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "4px",
-                }}
-                title={showCurrentPassword ? "Hide password" : "Show password"}
-              >
-                {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="input-group">
-              <label className="input-label">New Password (min 12 chars)</label>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <input
-                  type={showNewPassword ? "text" : "password"}
-                  required
-                  minLength={12}
-                  className="input-field"
-                  style={{ paddingRight: "40px" }}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 12 characters"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  style={{
-                    position: "absolute",
-                    right: "12px",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--text-muted)",
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "4px",
-                  }}
-                  title={showNewPassword ? "Hide password" : "Show password"}
-                >
-                  {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Confirm New Password</label>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <input
-                  type={showConfirmPassword ? "text" : "password"}
-                  required
-                  minLength={12}
-                  className="input-field"
-                  style={{ paddingRight: "40px" }}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter new password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={{
-                    position: "absolute",
-                    right: "12px",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--text-muted)",
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "4px",
-                  }}
-                  title={showConfirmPassword ? "Hide password" : "Show password"}
-                >
-                  {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: "10px 14px",
-              borderRadius: "var(--radius-sm)",
-              background: "rgba(99, 102, 241, 0.08)",
-              border: "1px solid rgba(99, 102, 241, 0.2)",
-              fontSize: "12px",
-              color: "var(--text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <Info size={14} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
-            <span>Passwords are hashed with Bcrypt. Passwords must be at least 12 characters and max 72 bytes.</span>
-          </div>
-
-          <button
-            type="submit"
-            disabled={passwordLoading || !isOnline}
-            className="btn btn-primary"
-            style={{ alignSelf: "flex-start", minHeight: "44px" }}
-          >
-            {passwordLoading ? (
-              <span className="flex items-center gap-2">
-                <RefreshCw size={14} className="animate-spin" />
-                <span>Updating Password...</span>
-              </span>
-            ) : (
-              <span>Update Password</span>
-            )}
-          </button>
-        </form>
-      </div>
-
-      {/* 3. Data Export & CSV Reports */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-          <FileSpreadsheet size={20} style={{ color: "var(--accent-emerald)" }} />
-          <h3 style={{ fontSize: "17px" }}>Data Export (CSV & Excel Friendly)</h3>
-        </div>
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          Download standard, clean CSV exports of your financial records anytime for offline analysis, spreadsheets, or tax filing.
-        </p>
-
-        {!isOnline && (
-          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
-            <AlertCircle size={14} />
-            <span>You are currently offline. Exporting from server requires an active connection.</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            type="button"
-            disabled={!isOnline}
-            onClick={downloadTransactionsCsv}
-            className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px", minHeight: "44px" }}
-          >
-            <Download size={16} />
-            <span>Transactions CSV</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!isOnline}
-            onClick={downloadBudgetsCsv}
-            className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px", minHeight: "44px" }}
-          >
-            <Download size={16} />
-            <span>Budgets CSV</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!isOnline}
-            onClick={downloadDebtsCsv}
-            className="btn btn-secondary flex items-center justify-center gap-2"
-            style={{ padding: "12px 14px", minHeight: "44px" }}
-          >
-            <Download size={16} />
-            <span>Debts CSV</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 4. CSV Statement Import */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-          <Upload size={20} style={{ color: "var(--accent-primary)" }} />
-          <h3 style={{ fontSize: "17px" }}>Import Bank / Mobile Money CSV Statement</h3>
-        </div>
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          Import transaction records from CSV files with automatic column detection (Date, Amount, Category, Memo/Payee, Type), currency sign removal, and duplicate avoidance.
-        </p>
-
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <input
-              ref={csvInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="input-field"
-              style={{ flex: 1 }}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  setCsvFile(e.target.files[0]);
-                  setCsvResult(null);
-                  setCsvError(null);
-                }
-              }}
-            />
-
-            <button
-              type="button"
-              disabled={!isOnline || !csvFile || csvImporting}
-              onClick={handleCsvImport}
-              className="btn btn-primary flex items-center gap-2"
-              style={{ minHeight: "44px" }}
-            >
-              {csvImporting ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-              <span>{csvImporting ? "Importing..." : "Upload & Parse CSV"}</span>
-            </button>
-          </div>
-
-          {!isOnline && (
-            <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", fontSize: "12px" }}>
-              <AlertCircle size={14} />
-              <span>CSV import requires an active internet connection.</span>
-            </div>
-          )}
-
-          <label className="flex items-center gap-2" style={{ fontSize: "13px", cursor: "pointer", color: "var(--text-secondary)" }}>
-            <input
-              type="checkbox"
-              checked={createMissingCats}
-              onChange={(e) => setCreateMissingCats(e.target.checked)}
-            />
-            <span>Automatically create new categories discovered in CSV if they don't already exist</span>
-          </label>
-
-          {csvError && (
-            <div className="badge-danger flex items-center gap-2" style={{ padding: "12px 16px", borderRadius: "var(--radius-md)" }}>
-              <AlertCircle size={16} />
-              <span>{csvError}</span>
-            </div>
-          )}
-
-          {csvResult && (
-            <div
-              className="badge-success flex flex-col gap-1"
-              style={{ padding: "14px 16px", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)" }}
-            >
-              <div className="flex items-center gap-2 font-semibold">
-                <Check size={16} />
-                <span>Import Complete!</span>
-              </div>
-              <div style={{ fontSize: "12px" }}>
-                Imported: <strong>{csvResult.imported_count}</strong> transactions • Skipped Duplicates: <strong>{csvResult.skipped_duplicates}</strong> • Categories Created: <strong>{csvResult.created_categories}</strong>
-              </div>
-              {csvResult.errors && csvResult.errors.length > 0 && (
-                <div style={{ marginTop: "6px", fontSize: "11px", color: "var(--accent-rose)" }}>
-                  Row notes: {csvResult.errors.join("; ")}
+                  {isPinSet && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={lockNow}
+                      icon={Lock}
+                    >
+                      Lock App Now
+                    </Button>
+                  )}
                 </div>
-              )}
+              </Card>
+
+              {/* Theme & Appearance */}
+              <Card title="Visual Theme" subtitle="Switch between modern Dark Obsidian and warm eye-friendly Light mode.">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
+                      Active Interface Theme
+                    </div>
+                    <div style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                      {theme === "light"
+                        ? "Warm Cream & Linen (soft contrast for daytime and low-glare reading)"
+                        : "Dark Obsidian (deep navy and charcoal for nighttime focus)"}
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={toggleTheme}
+                    icon={theme === "light" ? Moon : Sun}
+                  >
+                    Switch to {theme === "light" ? "Dark Mode" : "Light Mode"}
+                  </Button>
+                </div>
+              </Card>
+
+              {/* Active Currency */}
+              <form onSubmit={handleSaveGeneral}>
+                <Card
+                  title="Currency & Regional Formatting"
+                  subtitle="Choose the default currency for transaction metrics, budgets, and council financial analysis."
+                  footer={
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      isLoading={generalLoading}
+                      disabled={generalLoading}
+                    >
+                      Save Preferences
+                    </Button>
+                  }
+                >
+                  <div className="input-group" style={{ maxWidth: "420px" }}>
+                    <label className="input-label">Default Base Currency</label>
+                    <select
+                      className="input-field"
+                      value={selectedCurrency}
+                      onChange={(e) => setSelectedCurrency(e.target.value)}
+                      style={{ minHeight: "44px" }}
+                    >
+                      <option value="GHS">GHS (GH₵) - Ghana Cedi (Default)</option>
+                      <option value="USD">USD ($) - United States Dollar</option>
+                      <option value="EUR">EUR (€) - Euro</option>
+                      <option value="GBP">GBP (£) - British Pound Sterling</option>
+                      <option value="NGN">NGN (₦) - Nigerian Naira</option>
+                      <option value="KES">KES (KSh) - Kenyan Shilling</option>
+                      <option value="ZAR">ZAR (R) - South African Rand</option>
+                      <option value="CAD">CAD (CA$) - Canadian Dollar</option>
+                      <option value="AUD">AUD (A$) - Australian Dollar</option>
+                      <option value="INR">INR (₹) - Indian Rupee</option>
+                    </select>
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
+                      All monetary numbers in dashboards and transactions will format using this currency.
+                    </span>
+                  </div>
+                </Card>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 2: FINANCIAL GUARDRAILS */}
+          {activeTab === "guardrails" && (
+            <form onSubmit={handleSaveGuardrails} className="flex flex-col gap-6">
+              <Card
+                title="Hard Financial Guardrails"
+                subtitle="Enforce hard budgetary limits that trigger red warnings during AI Council deliberation, overriding model approvals."
+                footer={
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    isLoading={guardrailLoading}
+                    disabled={guardrailLoading}
+                  >
+                    Save Guardrails
+                  </Button>
+                }
+              >
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--bg-surface-solid)",
+                    border: "1px solid var(--border-color)",
+                    marginBottom: "20px",
+                    fontSize: "13px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <div className="flex items-center gap-2 font-semibold" style={{ color: "var(--text-primary)", marginBottom: "4px" }}>
+                    <Shield size={16} style={{ color: "var(--accent-secondary)" }} />
+                    <span>How Guardrails Protect You</span>
+                  </div>
+                  If a proposed purchase pushes your debt-to-income ratio above the threshold, or drops your liquid emergency runway below safe months, the Council flags it with a prominent red guardrail alert.
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="input-group">
+                    <label className="input-label">Max Debt-to-Income Ratio (% DTI)</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="10"
+                      max="80"
+                      className="input-field"
+                      value={maxDti}
+                      onChange={(e) => setMaxDti(parseFloat(e.target.value) || 40.0)}
+                      style={{ minHeight: "44px" }}
+                    />
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
+                      Healthy benchmark: 35% - 40% of gross income
+                    </span>
+                  </div>
+
+                  <div className="input-group">
+                    <label className="input-label">Minimum Safe Runway (Months)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      max="24"
+                      className="input-field"
+                      value={minRunway}
+                      onChange={(e) => setMinRunway(parseFloat(e.target.value) || 3.0)}
+                      style={{ minHeight: "44px" }}
+                    />
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
+                      Recommended emergency reserve: 3.0 to 6.0 months
+                    </span>
+                  </div>
+                </div>
+              </Card>
+            </form>
+          )}
+
+          {/* TAB 3: SECURITY & PIN */}
+          {activeTab === "security" && (
+            <div className="flex flex-col gap-6">
+              {/* App PIN Lock */}
+              <Card
+                title="Local PIN Protection"
+                subtitle="Lock MoneyCouncil behind a numeric passcode with automatic idle screen timeout."
+                headerAction={
+                  isPinSet ? (
+                    <Badge variant="success">
+                      <Check size={12} style={{ marginRight: "4px" }} /> PIN Active
+                    </Badge>
+                  ) : (
+                    <Badge variant="neutral">PIN Disabled</Badge>
+                  )
+                }
+              >
+                {/* Bug 8 Clarification Note */}
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius-md)",
+                    background: "rgba(99, 102, 241, 0.08)",
+                    border: "1px solid rgba(99, 102, 241, 0.2)",
+                    fontSize: "12px",
+                    color: "var(--text-secondary)",
+                    marginBottom: "16px",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong style={{ color: "var(--text-primary)" }}>Device Security Standard:</strong>
+                  <div>
+                    Your PIN is hashed locally using PBKDF2 (100,000 iterations with SHA-256) and never transmitted to our servers. Local offline database records in IndexedDB are protected behind your browser device sandbox and PIN lock screen.
+                  </div>
+                </div>
+
+                {pinError && (
+                  <div
+                    className="badge-danger flex items-center gap-2"
+                    style={{ padding: "10px 14px", borderRadius: "var(--radius-md)", marginBottom: "14px", fontSize: "13px" }}
+                  >
+                    <AlertCircle size={16} />
+                    <span>{pinError}</span>
+                  </div>
+                )}
+
+                {isPinSet && !isChangingPin ? (
+                  <div className="flex flex-col gap-4">
+                    <div
+                      style={{
+                        padding: "14px 16px",
+                        borderRadius: "var(--radius-md)",
+                        background: "var(--bg-surface-solid)",
+                        border: "1px solid var(--border-color)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
+                          Auto-Lock Timeout
+                        </div>
+                        <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                          App locks automatically after {autoLockMinutes} minutes of inactivity
+                        </div>
+                      </div>
+                      <Badge variant="info">{autoLockMinutes} minutes</Badge>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={lockNow}
+                        icon={Lock}
+                      >
+                        Lock Screen Now
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setIsChangingPin(true);
+                          setPinInput("");
+                          setConfirmPinInput("");
+                          setPinError(null);
+                        }}
+                        icon={KeyRound}
+                      >
+                        Change PIN Code
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="danger"
+                        onClick={handleRemovePin}
+                        icon={Unlock}
+                      >
+                        Disable PIN Lock
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSavePin} className="flex flex-col gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="input-group">
+                        <label className="input-label">Set 4 to 8 Digit PIN</label>
+                        <div style={{ position: "relative" }}>
+                          <input
+                            type={showPinText ? "text" : "password"}
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={8}
+                            required
+                            placeholder="Enter 4-8 digits"
+                            className="input-field"
+                            style={{ paddingRight: "40px", minHeight: "44px" }}
+                            value={pinInput}
+                            onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPinText(!showPinText)}
+                            style={{
+                              position: "absolute",
+                              right: "10px",
+                              top: "50%",
+                              transform: "translateY(-50%)",
+                              background: "none",
+                              border: "none",
+                              color: "var(--text-muted)",
+                              cursor: "pointer",
+                              padding: "4px",
+                            }}
+                          >
+                            {showPinText ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="input-group">
+                        <label className="input-label">Confirm PIN</label>
+                        <input
+                          type={showPinText ? "text" : "password"}
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={8}
+                          required
+                          placeholder="Re-enter PIN"
+                          className="input-field"
+                          style={{ minHeight: "44px" }}
+                          value={confirmPinInput}
+                          onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, ""))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="input-group" style={{ maxWidth: "300px" }}>
+                      <label className="input-label">Auto-Lock Idle Timeout</label>
+                      <select
+                        className="input-field"
+                        style={{ minHeight: "44px" }}
+                        value={selectedAutoLock}
+                        onChange={(e) => setSelectedAutoLock(parseInt(e.target.value) || 5)}
+                      >
+                        <option value={1}>1 Minute</option>
+                        <option value={2}>2 Minutes</option>
+                        <option value={5}>5 Minutes (Default)</option>
+                        <option value={15}>15 Minutes</option>
+                        <option value={30}>30 Minutes</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-2">
+                      <Button type="submit" variant="primary">
+                        {isPinSet ? "Update PIN Settings" : "Enable PIN Lock"}
+                      </Button>
+                      {isPinSet && isChangingPin && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setIsChangingPin(false)}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </form>
+                )}
+              </Card>
+
+              {/* Account Password Change */}
+              <Card
+                title="Change Account Password"
+                subtitle="Update your master password. Other active browser sessions will be invalidated for security."
+              >
+                {passwordError && (
+                  <div
+                    className="badge-danger flex items-center gap-2"
+                    style={{ padding: "10px 14px", borderRadius: "var(--radius-md)", marginBottom: "16px", fontSize: "13px" }}
+                  >
+                    <AlertCircle size={16} />
+                    <span>{passwordError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
+                  <div className="input-group" style={{ maxWidth: "420px" }}>
+                    <label className="input-label">Current Password</label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        type={showCurrentPassword ? "text" : "password"}
+                        required
+                        className="input-field"
+                        style={{ paddingRight: "40px", minHeight: "44px" }}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Enter current password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                        style={{
+                          position: "absolute",
+                          right: "10px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-muted)",
+                          cursor: "pointer",
+                          padding: "4px",
+                        }}
+                      >
+                        {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="input-group">
+                      <label className="input-label">New Password (min 12 chars)</label>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type={showNewPassword ? "text" : "password"}
+                          required
+                          minLength={12}
+                          className="input-field"
+                          style={{ paddingRight: "40px", minHeight: "44px" }}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="At least 12 characters"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          style={{
+                            position: "absolute",
+                            right: "10px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "none",
+                            border: "none",
+                            color: "var(--text-muted)",
+                            cursor: "pointer",
+                            padding: "4px",
+                          }}
+                        >
+                          {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="input-group">
+                      <label className="input-label">Confirm New Password</label>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type={showConfirmPassword ? "text" : "password"}
+                          required
+                          minLength={12}
+                          className="input-field"
+                          style={{ paddingRight: "40px", minHeight: "44px" }}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Re-enter new password"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          style={{
+                            position: "absolute",
+                            right: "10px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "none",
+                            border: "none",
+                            color: "var(--text-muted)",
+                            cursor: "pointer",
+                            padding: "4px",
+                          }}
+                        >
+                          {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      isLoading={passwordLoading}
+                      disabled={passwordLoading || !isOnline}
+                    >
+                      Update Password
+                    </Button>
+                    {!isOnline && (
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        Password change requires online connection.
+                      </span>
+                    )}
+                  </div>
+                </form>
+              </Card>
+            </div>
+          )}
+
+          {/* TAB 4: AI MODELS & COUNCIL */}
+          {activeTab === "models" && (
+            <div className="flex flex-col gap-6">
+              <AIModelsManager />
+            </div>
+          )}
+
+          {/* TAB 5: DATA & BACKUPS */}
+          {activeTab === "data" && (
+            <div className="flex flex-col gap-6">
+              <Card
+                title="Data & Disaster Recovery Center"
+                subtitle="Statement import, spreadsheet exports, and complete JSON disaster recovery snapshots."
+              >
+                <div className="flex flex-col gap-4">
+                  <p style={{ fontSize: "14px", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                    All statement parsing, duplicate-prevention imports, spreadsheet exports, and JSON database restore tools are consolidated in the dedicated Data & Backups hub.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={!isOnline}
+                      onClick={downloadTransactionsCsv}
+                      icon={Download}
+                    >
+                      Transactions CSV
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={!isOnline}
+                      onClick={downloadBudgetsCsv}
+                      icon={Download}
+                    >
+                      Budgets CSV
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={!isOnline}
+                      onClick={downloadDebtsCsv}
+                      icon={Download}
+                    >
+                      Debts CSV
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={!isOnline}
+                      onClick={downloadFullBackupJson}
+                      icon={Download}
+                    >
+                      Backup JSON
+                    </Button>
+                  </div>
+
+                  <div style={{ marginTop: "8px" }}>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => navigate("/data")}
+                      icon={ArrowRight}
+                    >
+                      Open Full Data & Backups Page
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* TAB 6: SYSTEM STATUS */}
+          {activeTab === "status" && (
+            <div className="flex flex-col gap-6">
+              <Card
+                title="MoneyCouncil Backend & Server Health"
+                subtitle="Real-time connectivity diagnostics, cloud host latency, and local synchronization status."
+                headerAction={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={isChecking}
+                    onClick={checkBackendHealth}
+                    isLoading={isChecking}
+                    icon={RefreshCw}
+                  >
+                    Check Health
+                  </Button>
+                }
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: "var(--radius-md)",
+                      background: "var(--bg-surface-solid)",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Server Status</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {isWarming ? (
+                        <Badge variant="warning">Waking Up ({retryCount}/3)</Badge>
+                      ) : serverStatus === "operational" && !lastError ? (
+                        <Badge variant="success">Operational</Badge>
+                      ) : (
+                        <Badge variant="danger">Unreachable</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: "var(--radius-md)",
+                      background: "var(--bg-surface-solid)",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Roundtrip Latency</div>
+                    <div style={{ fontSize: "18px", fontWeight: 700, marginTop: "4px", fontFamily: "var(--font-mono)" }}>
+                      {latencyMs !== null && serverStatus === "operational" && !lastError ? `${latencyMs}ms` : "—"}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: "var(--radius-md)",
+                      background: "var(--bg-surface-solid)",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Last Ping Probe</div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, marginTop: "6px" }}>
+                      {lastChecked ? lastChecked.toLocaleTimeString() : "Pending"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cold Start Explanation */}
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--bg-surface-solid)",
+                    border: "1px solid var(--border-color)",
+                    fontSize: "13px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <div className="flex items-center gap-2 font-semibold" style={{ color: "var(--text-primary)", marginBottom: "4px" }}>
+                    <Activity size={16} style={{ color: "var(--accent-primary)" }} />
+                    <span>Cloud Host Cold-Start Resilience</span>
+                  </div>
+                  MoneyCouncil includes automated retry logic with exponential backoff. If your backend is sleeping on Render or another free tier, the web app continues gracefully and polls until spin-up finishes.
+                </div>
+
+                {/* Offline Sync Status */}
+                <div
+                  style={{
+                    marginTop: "16px",
+                    padding: "14px 16px",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--bg-surface-solid)",
+                    border: "1px solid var(--border-color)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    {isOnline ? (
+                      <Wifi size={20} style={{ color: "var(--success)" }} />
+                    ) : (
+                      <WifiOff size={20} style={{ color: "var(--warning)" }} />
+                    )}
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
+                        Local Offline Outbox
+                      </div>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        {outboxItems.length === 0
+                          ? "All local transactions synced with server"
+                          : `${outboxItems.length} transactions pending upload`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {outboxItems.length > 0 && isOnline && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={triggerSync}
+                      isLoading={syncStatus === "syncing"}
+                      icon={RefreshCw}
+                    >
+                      Sync Outbox Now
+                    </Button>
+                  )}
+                </div>
+              </Card>
             </div>
           )}
         </div>
       </div>
-
-      {/* 5. Complete Database Backup & Restore (JSON) */}
-      <div className="glass-panel" style={{ padding: "24px" }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: "16px" }}>
-          <Database size={20} style={{ color: "var(--accent-purple)" }} />
-          <h3 style={{ fontSize: "17px" }}>Full Database Backup & Disaster Recovery (JSON)</h3>
-        </div>
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
-          Create a full, portable snapshot of your entire financial system — including all categories, transactions, budgets, savings goals, debts, and AI Council deliberated decisions.
-        </p>
-
-        {!isOnline && (
-          <div className="badge-warning flex items-center gap-2" style={{ padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: "14px", fontSize: "12px" }}>
-            <AlertCircle size={14} />
-            <span>Database backup and cloud restore require an active internet connection.</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Backup Export */}
-          <div
-            style={{
-              padding: "16px",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-surface-solid)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-            }}
-          >
-            <div>
-              <strong>Export Full Snapshot</strong>
-              <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Download complete encrypted JSON payload to your device.
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={!isOnline}
-              onClick={downloadFullBackupJson}
-              className="btn btn-secondary flex items-center justify-center gap-2"
-              style={{ marginTop: "auto", minHeight: "44px" }}
-            >
-              <Download size={16} />
-              <span>Download Backup (.json)</span>
-            </button>
-          </div>
-
-          {/* Backup Restore */}
-          <div
-            style={{
-              padding: "16px",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-surface-solid)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-            }}
-          >
-            <div>
-              <strong>Restore From Backup</strong>
-              <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Restore or merge a previously exported MoneyCouncil JSON snapshot.
-              </div>
-            </div>
-
-            <input
-              ref={jsonInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="input-field"
-              disabled={!isOnline}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  setJsonFile(e.target.files[0]);
-                  setRestoreResult(null);
-                  setRestoreError(null);
-                }
-              }}
-            />
-
-            <label className="flex items-center gap-2" style={{ fontSize: "12px", cursor: "pointer", color: "var(--text-secondary)" }}>
-              <input
-                type="checkbox"
-                disabled={!isOnline}
-                checked={overwriteRestore}
-                onChange={(e) => setOverwriteRestore(e.target.checked)}
-              />
-              <span style={{ color: overwriteRestore ? "var(--accent-rose)" : "inherit" }}>
-                Overwrite existing records (Wipes & replaces)
-              </span>
-            </label>
-
-            <button
-              type="button"
-              disabled={!isOnline || !jsonFile || jsonRestoring}
-              onClick={handleJsonRestore}
-              className="btn btn-primary flex items-center justify-center gap-2"
-              style={{ marginTop: "auto", minHeight: "44px" }}
-            >
-              {jsonRestoring ? <RefreshCw size={16} className="animate-spin" /> : <Layers size={16} />}
-              <span>{jsonRestoring ? "Restoring..." : "Restore Database"}</span>
-            </button>
-          </div>
-        </div>
-
-        {restoreError && (
-          <div className="badge-danger flex items-center gap-2" style={{ marginTop: "16px", padding: "12px 16px", borderRadius: "var(--radius-md)" }}>
-            <AlertCircle size={16} />
-            <span>{restoreError}</span>
-          </div>
-        )}
-
-        {restoreResult && (
-          <div
-            className="badge-success flex flex-col gap-1"
-            style={{ marginTop: "16px", padding: "14px 16px", borderRadius: "var(--radius-md)", background: "rgba(16, 185, 129, 0.1)" }}
-          >
-            <div className="flex items-center gap-2 font-semibold">
-              <Check size={16} />
-              <span>Restore Successful!</span>
-            </div>
-            <div style={{ fontSize: "12px" }}>
-              Categories: <strong>{restoreResult.restored_categories}</strong> • Transactions: <strong>{restoreResult.restored_transactions}</strong> • Budgets: <strong>{restoreResult.restored_budgets}</strong> • Goals: <strong>{restoreResult.restored_savings_goals}</strong> • Debts: <strong>{restoreResult.restored_debts}</strong> • Council Decisions: <strong>{restoreResult.restored_council_decisions}</strong>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 6. AI Council Models & Voters Manager */}
-      <AIModelsManager />
     </div>
   );
 };

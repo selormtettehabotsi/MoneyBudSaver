@@ -1,4 +1,13 @@
-import React, { useState } from "react";
+import React from "react";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
 import { MonthlyTrendPoint } from "../../types/finance";
 import { useCurrency } from "../../context/CurrencyContext";
 
@@ -8,171 +17,170 @@ interface CashFlowChartProps {
 
 export const CashFlowChart: React.FC<CashFlowChartProps> = ({ trendData }) => {
   const { formatMoney } = useCurrency();
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   if (!trendData || trendData.length === 0) {
     return (
-      <div className="glass-panel flex items-center justify-center" style={{ height: "280px" }}>
-        <span style={{ color: "var(--text-muted)" }}>No trend history available yet.</span>
+      <div
+        className="glass-panel"
+        style={{
+          height: "320px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px",
+        }}
+      >
+        <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>
+          No cash flow trend history available yet.
+        </span>
       </div>
     );
   }
 
-  // Find max value to scale chart height
-  const maxVal = Math.max(
-    ...trendData.flatMap((d) => [parseFloat(d.income || "0"), parseFloat(d.expense || "0")]),
-    100
-  );
+  // Format data for Recharts
+  const chartData = trendData.map((d) => {
+    const inc = parseFloat(d.income || "0");
+    const exp = parseFloat(d.expense || "0");
+    return {
+      month: d.month_str,
+      income: inc,
+      expense: exp,
+      net: inc - exp,
+    };
+  });
 
-  const chartHeight = 160;
-  const chartWidth = 500;
-  const barWidth = 18;
-  const groupSpacing = chartWidth / trendData.length;
+  // Custom accessible Tooltip showing Income, Expense, and Net
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const dataPoint = payload[0].payload;
+      return (
+        <div
+          className="glass-panel"
+          style={{
+            padding: "12px 14px",
+            background: "var(--bg-surface-solid)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "var(--radius-md)",
+            boxShadow: "var(--shadow-md)",
+            fontSize: "12px",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: "8px", color: "var(--text-primary)" }}>
+            {label}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "16px" }}>
+              <span style={{ color: "var(--success)", fontWeight: 600 }}>Income:</span>
+              <span className="tabular-nums" style={{ fontWeight: 600 }}>
+                {formatMoney(dataPoint.income)}
+              </span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "16px" }}>
+              <span style={{ color: "var(--danger)", fontWeight: 600 }}>Expense:</span>
+              <span className="tabular-nums" style={{ fontWeight: 600 }}>
+                {formatMoney(dataPoint.expense)}
+              </span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "16px",
+                borderTop: "1px solid var(--border-color)",
+                paddingTop: "4px",
+                marginTop: "2px",
+              }}
+            >
+              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Net Flow:</span>
+              <span
+                className="tabular-nums"
+                style={{
+                  fontWeight: 700,
+                  color: dataPoint.net >= 0 ? "var(--success)" : "var(--danger)",
+                }}
+              >
+                {dataPoint.net >= 0 ? "+" : ""}
+                {formatMoney(dataPoint.net)}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className="glass-panel" style={{ padding: "18px 20px", position: "relative" }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+    <div className="glass-panel" style={{ padding: "20px 24px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "16px",
+          flexWrap: "wrap",
+          gap: "10px",
+        }}
+      >
         <div>
-          <h3 style={{ fontSize: "16px" }}>Monthly Cash Flow Trends</h3>
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Last 6 Months Income vs Expense</span>
+          <h3 style={{ fontSize: "16px", fontWeight: 700, fontFamily: "var(--font-display)" }}>
+            Monthly Cash Flow Trends
+          </h3>
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+            6-Month Income vs Expense
+          </span>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-3" style={{ fontSize: "12px", fontWeight: 600, flexWrap: "wrap" }}>
-          <div className="flex items-center gap-1.5">
-            <span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "var(--success)" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "12px", fontWeight: 600 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span
+              style={{
+                width: "10px",
+                height: "10px",
+                borderRadius: "3px",
+                background: "#10b981",
+              }}
+            />
             <span style={{ color: "var(--text-secondary)" }}>Income</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span style={{ width: "10px", height: "10px", borderRadius: "2px", background: "var(--danger)" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span
+              style={{
+                width: "10px",
+                height: "10px",
+                borderRadius: "3px",
+                background: "#ef4444",
+              }}
+            />
             <span style={{ color: "var(--text-secondary)" }}>Expense</span>
           </div>
         </div>
       </div>
 
-      {/* SVG Chart Container */}
-      <div style={{ width: "100%", overflowX: "auto" }}>
-        <svg
-          viewBox={`0 0 ${chartWidth} ${chartHeight + 40}`}
-          style={{ width: "100%", height: "210px", overflow: "visible" }}
-        >
-          <defs>
-            <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#059669" stopOpacity="0.7" />
-            </linearGradient>
-            <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#e11d48" stopOpacity="0.7" />
-            </linearGradient>
-          </defs>
-
-          {/* Grid lines */}
-          {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => (
-            <line
-              key={i}
-              x1="0"
-              y1={chartHeight * (1 - pct)}
-              x2={chartWidth}
-              y2={chartHeight * (1 - pct)}
-              stroke="var(--border-color)"
-              strokeDasharray="3,3"
+      <div style={{ width: "100%", height: "230px" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+            <XAxis
+              dataKey="month"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: "var(--text-muted)", fontSize: 11 }}
             />
-          ))}
-
-          {/* Bars */}
-          {trendData.map((d, index) => {
-            const inc = parseFloat(d.income || "0");
-            const exp = parseFloat(d.expense || "0");
-
-            const incHeight = maxVal > 0 ? (inc / maxVal) * chartHeight : 0;
-            const expHeight = maxVal > 0 ? (exp / maxVal) * chartHeight : 0;
-
-            const groupX = index * groupSpacing + groupSpacing / 2;
-            const incX = groupX - barWidth - 2;
-            const expX = groupX + 2;
-
-            const isHovered = hoveredIndex === index;
-
-            return (
-              <g
-                key={d.month_str}
-                onMouseEnter={() => setHoveredIndex(index)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                style={{ cursor: "pointer" }}
-              >
-                {/* Income Bar */}
-                <rect
-                  x={incX}
-                  y={chartHeight - incHeight}
-                  width={barWidth}
-                  height={incHeight}
-                  rx="4"
-                  fill="url(#incomeGrad)"
-                  opacity={isHovered ? 1 : 0.85}
-                  style={{ transition: "all 0.2s ease" }}
-                />
-
-                {/* Expense Bar */}
-                <rect
-                  x={expX}
-                  y={chartHeight - expHeight}
-                  width={barWidth}
-                  height={expHeight}
-                  rx="4"
-                  fill="url(#expenseGrad)"
-                  opacity={isHovered ? 1 : 0.85}
-                  style={{ transition: "all 0.2s ease" }}
-                />
-
-                {/* Month Label */}
-                <text
-                  x={groupX}
-                  y={chartHeight + 22}
-                  textAnchor="middle"
-                  fill={isHovered ? "var(--accent-primary)" : "var(--text-muted)"}
-                  fontSize="11"
-                  fontWeight={isHovered ? "700" : "500"}
-                >
-                  {d.month_str.slice(5)}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+              tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={28} />
+            <Bar dataKey="expense" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={28} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
-
-      {/* Floating Hover Tooltip */}
-      {hoveredIndex !== null && trendData[hoveredIndex] && (
-        <div
-          style={{
-            position: "absolute",
-            top: "20px",
-            right: "24px",
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border-color)",
-            padding: "8px 14px",
-            borderRadius: "var(--radius-md)",
-            boxShadow: "var(--shadow-md)",
-            fontSize: "12px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "3px",
-            animation: "fadeIn 0.15s ease",
-          }}
-        >
-          <strong style={{ color: "var(--text-primary)" }}>{trendData[hoveredIndex].month_str}</strong>
-          <span style={{ color: "var(--success)" }}>
-            Income: {formatMoney(trendData[hoveredIndex].income)}
-          </span>
-          <span style={{ color: "var(--danger)" }}>
-            Expense: {formatMoney(trendData[hoveredIndex].expense)}
-          </span>
-          <span style={{ color: "var(--text-secondary)", borderTop: "1px solid var(--border-color)", paddingTop: "3px" }}>
-            Net: {formatMoney(trendData[hoveredIndex].net_savings)}
-          </span>
-        </div>
-      )}
     </div>
   );
 };

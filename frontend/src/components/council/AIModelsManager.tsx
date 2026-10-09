@@ -25,6 +25,8 @@ import {
   X,
 } from "lucide-react";
 import { councilApi } from "../../api/council";
+import { useToast } from "../../context/ToastContext";
+import { useConfirm } from "../../context/ConfirmDialogContext";
 import {
   ProviderStatusItem,
   TestConnectionResponse,
@@ -65,6 +67,8 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
 };
 
 export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [providers, setProviders] = useState<ProviderStatusItem[]>([]);
   const [recommendedMap, setRecommendedMap] = useState<Record<string, RecommendedModelItem[]>>({});
   const [loading, setLoading] = useState<boolean>(true);
@@ -172,8 +176,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
     try {
       await councilApi.updateAutoSwitch(enabled);
       setAutoSwitchEnabled(enabled);
+      toast.success(enabled ? "Auto-switch enabled" : "Auto-switch disabled");
     } catch (err: any) {
-      alert(err.message || "Failed to update auto-switch setting.");
+      toast.error(err.message || "Failed to update auto-switch setting.");
     } finally {
       setAutoSwitchLoading(false);
     }
@@ -187,6 +192,11 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       // Refresh providers to show updated median TTFT and status
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      if (res.status === "success") {
+        toast.success(`${providerName} passed test probe (${res.latency_ms}ms)`);
+      } else {
+        toast.warning(`${providerName}: ${res.diagnosis || res.status}`);
+      }
     } catch (err: any) {
       const isRateLimit = err?.status === 429 || (err?.message && err.message.toLowerCase().includes("rate limit"));
       setTestResults((prev) => ({
@@ -202,6 +212,7 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
           close_matches: [],
         },
       }));
+      toast.error(`${providerName} probe failed: ${err.message || "Error"}`);
     } finally {
       setTestLoading((prev) => ({ ...prev, [providerName]: false }));
     }
@@ -228,6 +239,11 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       // Refresh list
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.warning(res.message);
+      }
     } catch (err: any) {
       setUseRecResults((prev) => ({
         ...prev,
@@ -237,6 +253,7 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
           attempts: [],
         },
       }));
+      toast.error(err.message || "Failed to test recommended models.");
     } finally {
       setUseRecLoading((prev) => ({ ...prev, [providerName]: false }));
     }
@@ -250,8 +267,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       setFixAllResult(res);
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      toast.success(res.summary || "Fix All completed successfully!");
     } catch (err: any) {
-      alert(err.message || "Failed to fix council providers.");
+      toast.error(err.message || "Failed to fix council providers.");
     } finally {
       setFixAllLoading(false);
     }
@@ -277,21 +295,32 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       setConfirmedFreeCheck((prev) => ({ ...prev, [providerName]: false }));
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      toast.success(`Updated ${providerName} model to ${targetModel}`);
     } catch (err: any) {
-      setPasteError((prev) => ({ ...prev, [providerName]: err.message || "Failed to validate and save model." }));
+      const msg = err.message || "Failed to validate and save model.";
+      setPasteError((prev) => ({ ...prev, [providerName]: msg }));
+      toast.error(msg);
     } finally {
       setPasteSaving((prev) => ({ ...prev, [providerName]: false }));
     }
   };
 
   const handleRevertModel = async (providerName: string, targetModelId: string) => {
-    if (!window.confirm(`Revert ${providerName} to previous model '${targetModelId}'?`)) return;
+    const ok = await confirm({
+      title: "Revert Model?",
+      message: `Revert ${providerName} to previous model '${targetModelId}'?`,
+      confirmText: "Revert Model",
+      cancelText: "Cancel",
+    });
+    if (!ok) return;
+
     try {
       await councilApi.revertModel(providerName, targetModelId);
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      toast.success(`Reverted ${providerName} to ${targetModelId}`);
     } catch (err: any) {
-      alert(err.message || "Failed to revert model.");
+      toast.error(err.message || "Failed to revert model.");
     }
   };
 
@@ -305,8 +334,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       setProviders((prev) =>
         prev.map((p) => (p.name === providerName ? { ...p, enabled_in_council: enabled } : p))
       );
+      toast.info(`${providerName} council voting ${enabled ? "enabled" : "disabled"}`);
     } catch (err: any) {
-      alert(err.message || "Failed to update council toggle.");
+      toast.error(err.message || "Failed to update council toggle.");
     }
   };
 
@@ -329,8 +359,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
       setExpandedSettings((prev) => ({ ...prev, [providerName]: false }));
+      toast.success(`Saved sampling settings for ${providerName}`);
     } catch (err: any) {
-      alert(err.message || "Failed to save sampling parameters.");
+      toast.error(err.message || "Failed to save sampling parameters.");
     } finally {
       setSamplingSaving((prev) => ({ ...prev, [providerName]: false }));
     }
@@ -370,8 +401,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       setActiveBottomSheetProvider(null);
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      toast.success(`Selected model ${selectedModelId} for ${providerName}`);
     } catch (err: any) {
-      alert(err.message || "Failed to apply selected model.");
+      toast.error(err.message || "Failed to apply selected model.");
     }
   };
 
@@ -383,7 +415,7 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       const logs = await councilApi.getSwitchLogs();
       setSwitchLogs(logs);
     } catch (err: any) {
-      alert(err.message || "Failed to load switch logs.");
+      toast.error(err.message || "Failed to load switch logs.");
     } finally {
       setLogsLoading(false);
     }
@@ -396,8 +428,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       setSwitchLogs(logs);
       const updatedList = await councilApi.getProviders();
       setProviders(updatedList);
+      toast.success("Reverted model switch successfully");
     } catch (err: any) {
-      alert(err.message || "Failed to revert switch log.");
+      toast.error(err.message || "Failed to revert switch log.");
     }
   };
 
@@ -417,8 +450,9 @@ export const AIModelsManager: React.FC<AIModelsManagerProps> = ({ onClose }) => 
       const updatedRecMap = await councilApi.getRecommended();
       setRecommendedMap(updatedRecMap);
       setIsEditRecOpen(false);
+      toast.success("Updated recommended models list");
     } catch (err: any) {
-      alert(err.message || "Failed to save recommended models list.");
+      toast.error(err.message || "Failed to save recommended models list.");
     } finally {
       setRecSaving(false);
     }

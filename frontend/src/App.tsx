@@ -1,8 +1,20 @@
-import React, { useState } from "react";
+import React, { useEffect } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 import { ThemeProvider } from "./context/ThemeContext";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { ServerStatusProvider } from "./context/ServerStatusContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { SyncProvider } from "./context/SyncContext";
+import { PinLockProvider } from "./context/PinLockContext";
+import { ToastProvider } from "./context/ToastContext";
+import { ConfirmDialogProvider } from "./context/ConfirmDialogContext";
 import { Layout } from "./components/layout/Layout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -14,99 +26,111 @@ import { MorePage } from "./pages/MorePage";
 import { SuggestionsPage } from "./pages/SuggestionsPage";
 import { DataPage } from "./pages/DataPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { SyncProvider } from "./context/SyncContext";
-import { PinLockProvider } from "./context/PinLockContext";
 import { PinLockScreen } from "./components/common/PinLockScreen";
 import { PwaUpdatePrompt } from "./components/common/PwaUpdatePrompt";
-import { RefreshCw } from "lucide-react";
+import { LoadingScreen } from "./components/common/LoadingScreen";
+
+// Global navigation bridge preserving window.__navigateTo for legacy components
+const NavigationBridge: React.FC = () => {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    (window as any).__navigateTo = (page: string) => {
+      if (page === "budgets") navigate("/plan/budgets");
+      else if (page === "goals") navigate("/plan/goals");
+      else if (page === "debts") navigate("/plan/debts");
+      else if (page === "suggestions") navigate("/review");
+      else if (page === "plan") navigate("/plan/budgets");
+      else if (page.startsWith("/")) navigate(page);
+      else navigate(`/${page}`);
+    };
+  }, [navigate]);
+
+  return null;
+};
 
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
-  const [authView, setAuthView] = useState<"login" | "register">("login");
-  const [currentPage, setCurrentPage] = useState<string>("dashboard");
-  const [councilPrefill, setCouncilPrefill] = useState<string>("");
-
-  React.useEffect(() => {
-    (window as any).__navigateTo = setCurrentPage;
-  }, []);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   if (loading) {
-    return (
-      <div
-        style={{
-          minHeight: "100dvh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "12px",
-          background: "var(--bg-primary)",
-        }}
-      >
-        <img src="/favicon.svg" alt="Logo" style={{ width: "48px", height: "48px" }} />
-        <RefreshCw size={24} className="text-indigo-400" style={{ animation: "spin 1s linear infinite" }} />
-        <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Loading MoneyCouncil...</span>
-      </div>
-    );
+    return <LoadingScreen onTimeoutSkip={() => navigate("/login")} />;
   }
 
   // Unauthenticated Views
   if (!user) {
-    if (authView === "register") {
-      return <RegisterPage onNavigateToLogin={() => setAuthView("login")} />;
-    }
-    return <LoginPage onNavigateToRegister={() => setAuthView("register")} />;
+    return (
+      <>
+        <NavigationBridge />
+        <Routes>
+          <Route path="/register" element={<RegisterPage onNavigateToLogin={() => navigate("/login")} />} />
+          <Route path="/login" element={<LoginPage onNavigateToRegister={() => navigate("/register")} />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </>
+    );
   }
 
-  const navigateToCouncilWithQuery = (query?: string) => {
-    if (query) setCouncilPrefill(query);
-    setCurrentPage("council");
-  };
-
-  // Authenticated Application Views
-  const renderCurrentPage = () => {
-    switch (currentPage) {
-      case "dashboard":
-        return (
-          <DashboardPage
-            onNavigate={setCurrentPage}
-            onOpenNewTransaction={() => setCurrentPage("transactions")}
-          />
-        );
-      case "transactions":
-        return <TransactionsPage />;
-      case "council":
-        return <CouncilPage initialQuestion={councilPrefill} key={councilPrefill} />;
-      case "plan":
-        return <PlanPage initialTab="budgets" />;
-      case "budgets":
-        return <PlanPage initialTab="budgets" />;
-      case "goals":
-        return <PlanPage initialTab="goals" />;
-      case "debts":
-        return <PlanPage initialTab="debts" />;
-      case "more":
-        return <MorePage onNavigate={setCurrentPage} />;
-      case "suggestions":
-        return <SuggestionsPage onNavigateToCouncil={navigateToCouncilWithQuery} />;
-      case "data":
-        return <DataPage />;
-      case "settings":
-        return <SettingsPage />;
-      default:
-        return (
-          <DashboardPage
-            onNavigate={setCurrentPage}
-            onOpenNewTransaction={() => setCurrentPage("transactions")}
-          />
-        );
+  const handleNavigateToCouncil = (prefillQuery?: string) => {
+    if (prefillQuery) {
+      navigate("/council", { state: { initialQuestion: prefillQuery } });
+    } else {
+      navigate("/council");
     }
   };
 
+  const councilStateQuestion = (location.state as any)?.initialQuestion;
+
   return (
-    <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
-      {renderCurrentPage()}
-    </Layout>
+    <>
+      <NavigationBridge />
+      <Layout>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <DashboardPage
+                onNavigate={(page) => (window as any).__navigateTo(page)}
+                onOpenNewTransaction={() => navigate("/transactions")}
+              />
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <DashboardPage
+                onNavigate={(page) => (window as any).__navigateTo(page)}
+                onOpenNewTransaction={() => navigate("/transactions")}
+              />
+            }
+          />
+          <Route path="/transactions" element={<TransactionsPage />} />
+          <Route path="/plan" element={<Navigate to="/plan/budgets" replace />} />
+          <Route path="/plan/budgets" element={<PlanPage />} />
+          <Route path="/plan/goals" element={<PlanPage />} />
+          <Route path="/plan/debts" element={<PlanPage />} />
+          <Route
+            path="/council"
+            element={<CouncilPage initialQuestion={councilStateQuestion} key={councilStateQuestion || "council-default"} />}
+          />
+          <Route
+            path="/council/:decisionId"
+            element={<CouncilPage key={location.pathname} />}
+          />
+          <Route
+            path="/review"
+            element={<SuggestionsPage onNavigateToCouncil={handleNavigateToCouncil} />}
+          />
+          <Route path="/suggestions" element={<Navigate to="/review" replace />} />
+          <Route path="/data" element={<DataPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/:section" element={<SettingsPage />} />
+          <Route path="/more" element={<MorePage onNavigate={(p) => (window as any).__navigateTo(p)} />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Layout>
+    </>
   );
 };
 
@@ -115,15 +139,21 @@ export const App: React.FC = () => {
     <ThemeProvider>
       <CurrencyProvider>
         <ServerStatusProvider>
-          <AuthProvider>
-            <SyncProvider>
-              <PinLockProvider>
-                <AppContent />
-                <PinLockScreen />
-                <PwaUpdatePrompt />
-              </PinLockProvider>
-            </SyncProvider>
-          </AuthProvider>
+          <ToastProvider>
+            <ConfirmDialogProvider>
+              <AuthProvider>
+                <SyncProvider>
+                  <PinLockProvider>
+                    <BrowserRouter>
+                      <AppContent />
+                      <PinLockScreen />
+                      <PwaUpdatePrompt />
+                    </BrowserRouter>
+                  </PinLockProvider>
+                </SyncProvider>
+              </AuthProvider>
+            </ConfirmDialogProvider>
+          </ToastProvider>
         </ServerStatusProvider>
       </CurrencyProvider>
     </ThemeProvider>

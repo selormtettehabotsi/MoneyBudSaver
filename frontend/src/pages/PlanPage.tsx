@@ -1,66 +1,44 @@
-import React, { useState } from "react";
+import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { BudgetsPage } from "./BudgetsPage";
 import { GoalsPage } from "./GoalsPage";
 import { DebtsPage } from "./DebtsPage";
 import { PieChart, Target, CreditCard } from "lucide-react";
+import { SegmentedControl, SegmentOption } from "../components/common/SegmentedControl";
 
-interface PlanPageProps {
-  initialTab?: "budgets" | "goals" | "debts";
-}
+export const PlanPage: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
 
-export const PlanPage: React.FC<PlanPageProps> = ({ initialTab = "budgets" }) => {
-  const [activeTab, setActiveTab] = useState<"budgets" | "goals" | "debts">(initialTab);
+  // Determine active tab from URL path
+  const getActiveTab = (): "budgets" | "goals" | "debts" => {
+    if (location.pathname.includes("/goals")) return "goals";
+    if (location.pathname.includes("/debts")) return "debts";
+    return "budgets";
+  };
 
-  const tabs = [
-    { id: "budgets" as const, label: "Budgets", icon: PieChart },
-    { id: "goals" as const, label: "Goals", icon: Target },
-    { id: "debts" as const, label: "Debts", icon: CreditCard },
+  const activeTab = getActiveTab();
+
+  const handleTabChange = (tabId: "budgets" | "goals" | "debts") => {
+    navigate(`/plan/${tabId}`);
+  };
+
+  const options: SegmentOption<"budgets" | "goals" | "debts">[] = [
+    { id: "budgets", label: "Budgets & Limits", icon: <PieChart size={16} /> },
+    { id: "goals", label: "Savings Goals", icon: <Target size={16} /> },
+    { id: "debts", label: "Debts & Loans", icon: <CreditCard size={16} /> },
   ];
 
   return (
-    <div className="flex flex-col gap-4" style={{ width: "100%", maxWidth: "100%" }}>
-      {/* Segmented Sub-Tab Control */}
-      <div
-        className="glass-panel flex items-center justify-between"
-        style={{
-          padding: "6px",
-          background: "var(--bg-surface)",
-          borderRadius: "var(--radius-lg)",
-          gap: "6px",
-          width: "100%",
-        }}
-      >
-        {tabs.map((tab) => {
-          const IconComp = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="btn btn-sm"
-              style={{
-                flex: 1,
-                minHeight: "44px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "6px",
-                borderRadius: "var(--radius-md)",
-                border: "none",
-                background: isActive
-                  ? "linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-purple) 100%)"
-                  : "transparent",
-                color: isActive ? "#ffffff" : "var(--text-secondary)",
-                fontWeight: isActive ? 700 : 500,
-                cursor: "pointer",
-                transition: "all 0.18s ease",
-              }}
-            >
-              <IconComp size={16} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
+      {/* URL-synced Segmented Sub-Tab Control (Fixes Bug #1) */}
+      <div style={{ display: "flex", justifyContent: "flex-start", width: "100%" }}>
+        <SegmentedControl<"budgets" | "goals" | "debts">
+          options={options}
+          value={activeTab}
+          onChange={handleTabChange}
+          size="md"
+        />
       </div>
 
       {/* Render Active Plan Section */}
