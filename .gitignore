@@ -40,3 +40,7 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Obsidian & Local Documentation Vault
+.obsidian/
+docs/
