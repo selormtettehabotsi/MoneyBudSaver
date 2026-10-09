@@ -32,7 +32,18 @@ export const PlanPage: React.FC = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
       {/* URL-synced Segmented Sub-Tab Control (Fixes Bug #1) */}
-      <div style={{ display: "flex", justifyContent: "flex-start", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-start",
+          width: "100%",
+          position: "sticky",
+          top: "0px",
+          zIndex: 20,
+          padding: "4px 0 10px 0",
+          background: "var(--bg-primary)",
+        }}
+      >
         <SegmentedControl<"budgets" | "goals" | "debts">
           options={options}
           value={activeTab}

@@ -63,16 +63,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, []);
 
   return (
-    <div
-      className="app-container"
-      style={{
-        display: "flex",
-        minHeight: "100dvh",
-        width: "100%",
-        maxWidth: "100vw",
-        overflowX: "hidden",
-      }}
-    >
+    <div className="app-container">
       <ColdStartNotice />
 
       {/* Desktop Sidebar */}
@@ -81,19 +72,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
 
       {/* Main Content Area */}
-      <div
-        className="main-viewport"
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minWidth: 0,
-          width: "100%",
-          maxWidth: "100%",
-          padding: "16px 28px 80px 28px",
-          boxSizing: "border-box",
-        }}
-      >
+      <div className="main-viewport">
         <Navbar
           currentPageTitle={getTitle()}
           onOpenQuickAdd={() => setIsQuickAddOpen(true)}

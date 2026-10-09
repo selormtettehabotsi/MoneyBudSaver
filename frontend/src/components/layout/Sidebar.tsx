@@ -118,17 +118,17 @@ export const Sidebar: React.FC = () => {
       style={{
         width: collapsed ? "76px" : "var(--sidebar-width)",
         height: "calc(100vh - 32px)",
+        maxHeight: "calc(100vh - 32px)",
         margin: "16px 0 16px 16px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
         padding: collapsed ? "16px 8px" : "20px 16px",
-        position: "sticky",
-        top: "16px",
         transition: "width 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
         overflowY: "auto",
         overflowX: "hidden",
-        zIndex: 50,
+        boxSizing: "border-box",
+        flexShrink: 0,
       }}
     >
       <div>
