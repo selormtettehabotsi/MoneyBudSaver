@@ -80,18 +80,26 @@ MoneyCouncil integrates 4 distinct free-tier AI model families plus custom slots
 
 ### Step 4: Keep-Alive & Weekly Financial Review Automation
 
-Free Render instances spin down after 15 minutes of inactivity. Use an external ping monitor to prevent sleeping and schedule automated weekly reviews.
+Free Render instances spin down after 15 minutes of inactivity. MoneyCouncil includes a dual-layer automated keep-alive system to keep your Render instance awake 24/7 without shutting down:
 
-#### 1. Keep-Alive Ping (Every 5 minutes)
+#### 1. Layer 1: Built-in Render Auto-Pinger (Zero Setup Required)
+- **Mechanism**: When deployed on Render, Render automatically sets the `RENDER_EXTERNAL_URL` environment variable (e.g. `https://moneycouncil.onrender.com`).
+- **How it works**: The backend background task ([`keep_alive.py`](file:///backend/app/services/keep_alive.py)) automatically sends an HTTP request to its own public `/health` endpoint every 10 minutes through Render's external router.
+- **Result**: Because the request traverses Render's public edge router, Render detects active inbound HTTP traffic and constantly resets its 15-minute idle countdown before the service can sleep.
+- **DB Load**: Completely zero. The `/health` endpoint executes no SQL queries.
+
+#### 2. Layer 2: Automated GitHub Action Workflow (Wake-Up Spark Plug)
+- **Workflow**: [`.github/workflows/render-keep-alive.yml`](file:///.github/workflows/render-keep-alive.yml)
+- **Schedule**: Runs automatically every 14 minutes via GitHub Actions cron.
+- **How it works**: Executes a fast `curl` request to your live Render `/health` endpoint. If your app is ever stopped (e.g. following cold reboot or maintenance), this external ping wakes Render up from the outside.
+- **Configuration (Optional)**: If your Render URL is not `https://moneycouncil.onrender.com`, add your custom URL under your GitHub repository: **Settings** → **Secrets and variables** → **Actions** → **Variables** → `RENDER_APP_URL`.
+
+#### 3. Optional 3rd Backup: External Ping Monitors (UptimeRobot / cron-job.org)
 - **Service**: [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org)
 - **URL**: `https://your-app.onrender.com/health`
 - **HTTP Method**: `GET` (or `HEAD`)
-- **Interval**: Every 5 minutes
+- **Interval**: Every 5 to 10 minutes
 - **Expected Status**: `200 OK`
-- **Zero DB Load**: `/health` accesses no database and is exempt from rate limiting.
-
-> [!TIP]
-> **Backup Option (Cloudflare Worker Cron Trigger)**: You can also deploy a free 3-line Cloudflare Worker on a cron schedule (`*/5 * * * *`) that executes `fetch("https://your-app.onrender.com/health")`.
 
 #### 2. Automated Weekly Financial Review (Every Sunday)
 - **Service**: [cron-job.org](https://cron-job.org)

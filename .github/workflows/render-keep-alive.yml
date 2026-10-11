@@ -1,0 +1,30 @@
+name: Render Server Keep-Alive & Wake-Up
+
+on:
+  schedule:
+    # Runs every 14 minutes (Render free tier spins down after 15 minutes of inactivity)
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  keep-alive:
+    name: Ping Render /health Endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping Web Service
+        run: |
+          TARGET_URL="${{ secrets.RENDER_APP_URL || vars.RENDER_APP_URL || 'https://moneycouncil.onrender.com' }}"
+          HEALTH_URL="${TARGET_URL%/}/health"
+          echo "Pinging: ${HEALTH_URL}"
+          
+          # Request /health endpoint with 45s timeout and 2 retries in case Render instance is waking from cold start
+          HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -m 45 --retry 2 --retry-delay 5 "${HEALTH_URL}" || echo "000")
+          echo "HTTP Response Status: ${HTTP_STATUS}"
+          
+          if [ "${HTTP_STATUS}" = "200" ]; then
+            echo "✅ Keep-alive ping successful. Server is awake."
+          else
+            echo "⚠️ Health check returned status ${HTTP_STATUS}. Inbound request still triggered Render router wake-up."
+          fi

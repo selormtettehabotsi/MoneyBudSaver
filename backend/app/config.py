@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # Cron Endpoint Secret (for weekly review webhook)
     CRON_SECRET: str = "dev_cron_secret_123_change_in_production"
 
+    # Render Keep-Alive Automation (Prevents 15-min idle spin-down)
+    KEEP_ALIVE_ENABLED: bool = True
+    KEEP_ALIVE_INTERVAL_SECONDS: int = 600  # 10 minutes (safely under 15-min idle limit)
+    KEEP_ALIVE_URL: Optional[str] = None
+    RENDER_EXTERNAL_URL: Optional[str] = None
+
     # AI Provider Engine Configuration
     AI_PROVIDER_TIMEOUT_SECONDS: int = 25
     AI_PROVIDER_DEFAULT_TIMEOUT_SECONDS: int = 25

@@ -4,6 +4,7 @@ Serves both REST API and single-origin React PWA frontend.
 """
 import os
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,7 @@ from app.db.init_db import init_db
 from app.api.api_router import api_v1_router
 from app.api.v1.health import router as health_router
 from app.api.v1.cron import router as cron_router
+from app.services.keep_alive import start_keep_alive_task
 
 from app.core.logging_config import setup_secure_logging
 
@@ -31,7 +33,15 @@ async def lifespan(app: FastAPI):
     # Initialize database tables on startup
     setup_secure_logging()
     init_db()
-    yield
+    keep_alive_task = asyncio.create_task(start_keep_alive_task())
+    try:
+        yield
+    finally:
+        keep_alive_task.cancel()
+        try:
+            await keep_alive_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
