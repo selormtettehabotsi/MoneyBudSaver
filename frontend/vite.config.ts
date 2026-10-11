@@ -107,6 +107,18 @@ export default defineConfig({
     // Strips console.log and debugger statements in production builds
     drop: process.env.NODE_ENV === "production" ? ["console", "debugger"] : [],
   },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "react-router-dom"],
+          charts: ["recharts"],
+          icons: ["lucide-react"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

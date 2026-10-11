@@ -20,19 +20,42 @@ def get_keep_alive_target_url() -> Optional[str]:
     """
     Resolves the external URL for keep-alive pings.
     Prioritizes explicit KEEP_ALIVE_URL, then Render's automatic RENDER_EXTERNAL_URL.
+    Safeguards against missing protocols ('http://' or 'https://') and wildcard placeholders ('*.onrender.com').
     """
-    raw_url = (
-        settings.KEEP_ALIVE_URL
-        or settings.RENDER_EXTERNAL_URL
-        or os.getenv("KEEP_ALIVE_URL")
-        or os.getenv("RENDER_EXTERNAL_URL")
-    )
+    candidates = [
+        settings.KEEP_ALIVE_URL,
+        os.getenv("KEEP_ALIVE_URL"),
+        settings.RENDER_EXTERNAL_URL,
+        os.getenv("RENDER_EXTERNAL_URL"),
+        os.getenv("RENDER_EXTERNAL_HOSTNAME"),
+    ]
+
+    raw_url = None
+    for cand in candidates:
+        if cand and str(cand).strip():
+            cand_str = str(cand).strip()
+            # If candidate does not contain placeholder characters, pick it
+            if "*" not in cand_str and "<" not in cand_str:
+                raw_url = cand_str
+                break
+            elif not raw_url:
+                raw_url = cand_str
+
     if not raw_url:
         return None
 
     cleaned = raw_url.strip().rstrip("/")
     if not cleaned:
         return None
+
+    # Replace placeholder wildcard '*' if e.g. '*.onrender.com' was passed
+    if "*" in cleaned:
+        service_name = os.getenv("RENDER_SERVICE_NAME", "moneycouncil-7zcr")
+        cleaned = cleaned.replace("*", service_name)
+
+    # Ensure http:// or https:// protocol is present
+    if not (cleaned.startswith("http://") or cleaned.startswith("https://")):
+        cleaned = f"https://{cleaned}"
 
     if not cleaned.endswith("/health"):
         cleaned = f"{cleaned}/health"

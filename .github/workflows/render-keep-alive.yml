@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Ping Web Service
         run: |
-          TARGET_URL="${{ secrets.RENDER_APP_URL || vars.RENDER_APP_URL || 'https://moneycouncil.onrender.com' }}"
+          TARGET_URL="${{ secrets.RENDER_APP_URL || vars.RENDER_APP_URL || 'https://moneycouncil-7zcr.onrender.com' }}"
           HEALTH_URL="${TARGET_URL%/}/health"
           echo "Pinging: ${HEALTH_URL}"
           

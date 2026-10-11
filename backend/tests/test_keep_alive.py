@@ -27,7 +27,21 @@ def test_get_keep_alive_target_url_formats_cleanly(monkeypatch):
     monkeypatch.setattr(settings, "RENDER_EXTERNAL_URL", None)
     monkeypatch.delenv("KEEP_ALIVE_URL", raising=False)
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    monkeypatch.delenv("RENDER_EXTERNAL_HOSTNAME", raising=False)
     assert get_keep_alive_target_url() is None
+
+    # Missing http:// or https:// protocol (e.g. moneycouncil.onrender.com)
+    monkeypatch.setattr(settings, "KEEP_ALIVE_URL", "moneycouncil.onrender.com")
+    assert get_keep_alive_target_url() == "https://moneycouncil.onrender.com/health"
+
+    # Wildcard placeholder (e.g. *.onrender.com)
+    monkeypatch.setattr(settings, "KEEP_ALIVE_URL", "*.onrender.com")
+    assert get_keep_alive_target_url() == "https://moneycouncil-7zcr.onrender.com/health"
+
+    # When KEEP_ALIVE_URL is a wildcard placeholder but RENDER_EXTERNAL_URL is valid
+    monkeypatch.setattr(settings, "KEEP_ALIVE_URL", "*.onrender.com")
+    monkeypatch.setattr(settings, "RENDER_EXTERNAL_URL", "https://moneycouncil-7zcr.onrender.com")
+    assert get_keep_alive_target_url() == "https://moneycouncil-7zcr.onrender.com/health"
 
 
 @pytest.mark.asyncio
