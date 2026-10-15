@@ -22,13 +22,20 @@ def test_get_keep_alive_target_url_formats_cleanly(monkeypatch):
     monkeypatch.setattr(settings, "KEEP_ALIVE_URL", "https://moneycouncil.onrender.com/health")
     assert get_keep_alive_target_url() == "https://moneycouncil.onrender.com/health"
 
-    # Empty
+    # Empty in dev
     monkeypatch.setattr(settings, "KEEP_ALIVE_URL", None)
     monkeypatch.setattr(settings, "RENDER_EXTERNAL_URL", None)
     monkeypatch.delenv("KEEP_ALIVE_URL", raising=False)
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
     monkeypatch.delenv("RENDER_EXTERNAL_HOSTNAME", raising=False)
+    monkeypatch.setattr(settings, "DEPLOYMENT_MODE", "local")
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
     assert get_keep_alive_target_url() is None
+
+    # Empty in hosted/production -> falls back to moneycouncil-7zcr.onrender.com
+    monkeypatch.setattr(settings, "DEPLOYMENT_MODE", "hosted")
+    assert get_keep_alive_target_url() == "https://moneycouncil-7zcr.onrender.com/health"
+    monkeypatch.setattr(settings, "DEPLOYMENT_MODE", "local")
 
     # Missing http:// or https:// protocol (e.g. moneycouncil.onrender.com)
     monkeypatch.setattr(settings, "KEEP_ALIVE_URL", "moneycouncil.onrender.com")

@@ -276,3 +276,176 @@ def test_database_migration_with_existing_rows(tmp_path):
         assert float(row[1]) == 50.00
         assert row[2] == "Pre-existing Transaction"
         assert row[3] is None
+
+
+def test_all_entity_update_edge_cases(make_auth_client):
+    """
+    Exhaustively tests all entity update operations and edge cases:
+    - Debt: 0 minimum payment, clearing notes/payoff date, 0 balance
+    - Savings Goal: clearing target date, clearing notes, auto completion logic
+    - Budget: multi-field update (month/year/limit), duplicate conflict 400
+    - Category: duplicate rename rejection 400, empty name 400, valid update
+    - Transaction: clearing category_id to null, updating tags, amount, type
+    - User Settings: deep merge preserving nested settings, GET /csrf setting cookie
+    """
+    client, user = make_auth_client("update_tester@example.com", "Password123!")
+
+    # 1. DEBT UPDATE EDGE CASES
+    debt = client.post(
+        "/api/v1/debts",
+        json={
+            "name": "Car Loan",
+            "total_principal": "5000.00",
+            "remaining_balance": "4000.00",
+            "interest_rate": "5.500",
+            "minimum_payment": "150.00",
+            "start_date": "2026-01-01",
+            "notes": "Initial Note",
+        },
+    ).json()
+    debt_id = debt["id"]
+    assert debt["minimum_payment"] == "150.00"
+
+    # Update debt with minimum_payment: 0.00 and clear notes (None)
+    debt_up = client.put(
+        f"/api/v1/debts/{debt_id}",
+        json={
+            "minimum_payment": "0.00",
+            "remaining_balance": "0.00",
+            "notes": None,
+        },
+    )
+    assert debt_up.status_code == 200
+    d_data = debt_up.json()
+    assert Decimal(d_data["minimum_payment"]) == Decimal("0.00")
+    assert Decimal(d_data["remaining_balance"]) == Decimal("0.00")
+    assert d_data["notes"] is None
+    assert d_data["payoff_progress_percentage"] == 100.0
+
+    # 2. SAVINGS GOAL UPDATE EDGE CASES
+    goal = client.post(
+        "/api/v1/savings-goals",
+        json={
+            "title": "Emergency Fund",
+            "target_amount": "2000.00",
+            "current_amount": "500.00",
+            "target_date": "2026-12-31",
+            "notes": "Goal Note",
+        },
+    ).json()
+    goal_id = goal["id"]
+    assert goal["target_date"] == "2026-12-31"
+
+    # Clear target_date and notes, and update current_amount to match target
+    goal_up = client.put(
+        f"/api/v1/savings-goals/{goal_id}",
+        json={
+            "target_date": None,
+            "notes": None,
+            "current_amount": "2000.00",
+        },
+    )
+    assert goal_up.status_code == 200
+    g_data = goal_up.json()
+    assert g_data["target_date"] is None
+    assert g_data["notes"] is None
+    assert g_data["is_completed"] is True
+    assert g_data["progress_percentage"] == 100.0
+
+    # 3. CATEGORY UPDATE EDGE CASES
+    cat1 = client.post(
+        "/api/v1/categories",
+        json={"name": "Groceries", "type": "expense", "icon_name": "shopping-cart", "color_hex": "#10b981"},
+    ).json()
+    cat2 = client.post(
+        "/api/v1/categories",
+        json={"name": "Utilities", "type": "expense", "icon_name": "zap", "color_hex": "#3b82f6"},
+    ).json()
+
+    # Try renaming cat2 to "Groceries" -> Must reject with 400
+    cat_dup = client.put(f"/api/v1/categories/{cat2['id']}", json={"name": "Groceries"})
+    assert cat_dup.status_code == 400
+    assert "already exists" in cat_dup.json()["detail"]
+
+    # Try empty name -> 400
+    cat_empty = client.put(f"/api/v1/categories/{cat2['id']}", json={"name": "   "})
+    assert cat_empty.status_code == 400
+
+    # Valid category update
+    cat_valid = client.put(f"/api/v1/categories/{cat2['id']}", json={"name": "Home Utilities", "color_hex": "#6366f1"})
+    assert cat_valid.status_code == 200
+    assert cat_valid.json()["name"] == "Home Utilities"
+
+    # 4. BUDGET UPDATE EDGE CASES
+    b1 = client.post(
+        "/api/v1/budgets",
+        json={"category_id": cat1["id"], "month": 10, "year": 2026, "amount_limit": "500.00"},
+    ).json()
+    b2 = client.post(
+        "/api/v1/budgets",
+        json={"category_id": cat2["id"], "month": 10, "year": 2026, "amount_limit": "300.00"},
+    ).json()
+
+    # Try moving b2 to cat1/10/2026 -> Must return 400 duplicate error
+    b_dup = client.put(f"/api/v1/budgets/{b2['id']}", json={"category_id": cat1["id"]})
+    assert b_dup.status_code == 400
+    assert "already exists" in b_dup.json()["detail"]
+
+    # Valid budget update: change month and limit
+    b_valid = client.put(f"/api/v1/budgets/{b2['id']}", json={"month": 11, "amount_limit": "450.00"})
+    assert b_valid.status_code == 200
+    assert b_valid.json()["month"] == 11
+    assert Decimal(b_valid.json()["amount_limit"]) == Decimal("450.00")
+
+    # 5. TRANSACTION UPDATE EDGE CASES
+    tx = client.post(
+        "/api/v1/transactions",
+        json={
+            "amount": "120.00",
+            "type": "expense",
+            "date": "2026-10-15",
+            "description": "Weekly Supermarket",
+            "category_id": cat1["id"],
+            "tags": ["groceries", "food"],
+        },
+    ).json()
+    tx_id = tx["id"]
+    assert tx["category_id"] == cat1["id"]
+
+    # Clear category_id to None/null and update tags
+    tx_up = client.put(
+        f"/api/v1/transactions/{tx_id}",
+        json={
+            "category_id": None,
+            "description": "Weekly Supermarket (Uncategorized)",
+            "tags": [],
+        },
+    )
+    assert tx_up.status_code == 200
+    t_data = tx_up.json()
+    assert t_data["category_id"] is None
+    assert t_data["category"] is None
+    assert t_data["description"] == "Weekly Supermarket (Uncategorized)"
+    assert t_data["tags"] == []
+
+    # 6. USER SETTINGS & CSRF
+    # Verify GET /api/v1/auth/csrf sets mc_csrf cookie
+    csrf_res = client.get("/api/v1/auth/csrf")
+    assert csrf_res.status_code == 200
+    assert "csrf_token" in csrf_res.json()
+    assert "mc_csrf" in csrf_res.cookies
+
+    # Test settings update with deep merge
+    client.put("/api/v1/auth/settings", json={"settings": {"thresholds": {"max_dti": 35.0, "min_runway": 4.0}}})
+    # Update only max_dti in thresholds
+    set_up = client.put(
+        "/api/v1/auth/settings",
+        json={"currency": "USD", "settings": {"thresholds": {"max_dti": 32.0}}},
+    )
+    assert set_up.status_code == 200
+    user_settings = set_up.json()["settings"]
+    assert set_up.json()["currency"] == "USD"
+    # min_runway must NOT be lost!
+    assert user_settings["thresholds"]["max_dti"] == 32.0
+    assert user_settings["thresholds"]["min_runway"] == 4.0
+

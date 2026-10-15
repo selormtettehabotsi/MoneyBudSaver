@@ -42,7 +42,10 @@ def get_keep_alive_target_url() -> Optional[str]:
                 raw_url = cand_str
 
     if not raw_url:
-        return None
+        if settings.is_hosted or settings.ENVIRONMENT == "production":
+            raw_url = "https://moneycouncil-7zcr.onrender.com"
+        else:
+            return None
 
     cleaned = raw_url.strip().rstrip("/")
     if not cleaned:

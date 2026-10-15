@@ -101,15 +101,14 @@ async def update_savings_goal(
         goal.target_amount = payload.target_amount
     if payload.current_amount is not None:
         goal.current_amount = payload.current_amount
-    if payload.target_date is not None:
+    if "target_date" in payload.model_fields_set:
         goal.target_date = payload.target_date
-    if payload.notes is not None:
-        goal.notes = payload.notes
-    if payload.is_completed is not None:
+    if "notes" in payload.model_fields_set:
+        goal.notes = payload.notes.strip() if (payload.notes and payload.notes.strip()) else None
+    if "is_completed" in payload.model_fields_set and payload.is_completed is not None:
         goal.is_completed = payload.is_completed
-
-    if goal.current_amount >= goal.target_amount:
-        goal.is_completed = True
+    else:
+        goal.is_completed = goal.current_amount >= goal.target_amount
 
     db.commit()
     db.refresh(goal)

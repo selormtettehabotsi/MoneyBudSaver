@@ -229,10 +229,33 @@ async def get_current_user_profile(
     return user_out
 
 
+def _deep_merge_dict(target: dict, source: dict) -> dict:
+    """Recursively merges nested dictionaries without clobbering sibling keys."""
+    res = dict(target)
+    for k, v in source.items():
+        if isinstance(v, dict) and k in res and isinstance(res[k], dict):
+            res[k] = _deep_merge_dict(res[k], v)
+        else:
+            res[k] = v
+    return res
+
+
 @router.get("/csrf", response_model=CSRFTokenOut)
-async def get_csrf_token(current_user: User = Depends(get_current_user)):
-    """Fetch or refresh the CSRF token for the authenticated user."""
+async def get_csrf_token(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch or refresh the CSRF token for the authenticated user and update cookie."""
     token = generate_csrf_token(current_user.id)
+    response.set_cookie(
+        key=settings.CSRF_COOKIE_NAME,
+        value=token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=False,
+        secure=settings.effective_cookie_secure,
+        samesite=settings.COOKIE_SAMESITE,
+        path="/",
+    )
     return CSRFTokenOut(csrf_token=token)
 
 
@@ -242,19 +265,22 @@ async def update_user_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update user currency, financial guardrail thresholds, or model options."""
+    """Update user currency, financial guardrail thresholds, or model options with deep merge."""
+    from sqlalchemy.orm.attributes import flag_modified
+
     if payload.currency:
-        current_user.currency = payload.currency.upper()
+        current_user.currency = payload.currency.upper().strip()
 
     if payload.settings is not None:
         current_settings = dict(current_user.settings or {})
-        current_settings.update(payload.settings)
+        merged_settings = _deep_merge_dict(current_settings, payload.settings)
         
         # If backend is hosted, force ollama to disabled in settings
-        if settings.is_hosted and "providers_enabled" in current_settings:
-            current_settings["providers_enabled"]["ollama"] = False
+        if settings.is_hosted and "providers_enabled" in merged_settings and isinstance(merged_settings["providers_enabled"], dict):
+            merged_settings["providers_enabled"]["ollama"] = False
 
-        current_user.settings = current_settings
+        current_user.settings = merged_settings
+        flag_modified(current_user, "settings")
 
     db.commit()
     db.refresh(current_user)

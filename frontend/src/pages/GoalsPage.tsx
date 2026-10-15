@@ -144,13 +144,16 @@ export const GoalsPage: React.FC = () => {
 
     setSubmitting(true);
     try {
+      const cleanNotes = notes.trim() ? notes.trim() : null;
+      const cleanTargetDate = targetDate ? targetDate : null;
+
       if (editingGoal) {
         await goalsApi.update(editingGoal.id, {
           title: title.trim(),
           target_amount: targetAmount,
           current_amount: currentAmount || "0.00",
-          target_date: targetDate || null,
-          notes: notes.trim() || undefined,
+          target_date: cleanTargetDate,
+          notes: cleanNotes,
         });
         toastSuccess("Savings goal updated.");
       } else {
@@ -158,8 +161,8 @@ export const GoalsPage: React.FC = () => {
           title: title.trim(),
           target_amount: targetAmount,
           current_amount: currentAmount || "0.00",
-          target_date: targetDate || null,
-          notes: notes.trim() || undefined,
+          target_date: cleanTargetDate,
+          notes: cleanNotes,
         });
         toastSuccess("Savings goal created.");
       }

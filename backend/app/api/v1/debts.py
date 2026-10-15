@@ -122,10 +122,10 @@ async def update_debt(
         debt.due_day_of_month = payload.due_day_of_month
     if payload.start_date is not None:
         debt.start_date = payload.start_date
-    if payload.estimated_payoff_date is not None:
+    if "estimated_payoff_date" in payload.model_fields_set:
         debt.estimated_payoff_date = payload.estimated_payoff_date
-    if payload.notes is not None:
-        debt.notes = payload.notes
+    if "notes" in payload.model_fields_set:
+        debt.notes = payload.notes.strip() if (payload.notes and payload.notes.strip()) else None
 
     db.commit()
     db.refresh(debt)

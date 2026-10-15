@@ -30,7 +30,21 @@ export async function apiClient<T>(
   // Double-Submit CSRF Token on mutation requests
   const method = (options.method || "GET").toUpperCase();
   if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
-    const csrfToken = getCookie("mc_csrf");
+    let csrfToken = getCookie("mc_csrf");
+    if (!csrfToken && !endpoint.includes("/auth/login") && !endpoint.includes("/auth/register") && !endpoint.includes("/auth/csrf")) {
+      try {
+        const csrfRes = await fetch("/api/v1/auth/csrf", { credentials: "include" });
+        if (csrfRes.ok) {
+          const csrfData = await csrfRes.json();
+          if (csrfData?.csrf_token) {
+            csrfToken = csrfData.csrf_token;
+          }
+        }
+      } catch {}
+      if (!csrfToken) {
+        csrfToken = getCookie("mc_csrf");
+      }
+    }
     if (csrfToken && !headers.has("X-CSRF-Token")) {
       headers.set("X-CSRF-Token", csrfToken);
     }
@@ -59,6 +73,23 @@ export async function apiClient<T>(
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: "Request failed" }));
         const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status} Error`;
+
+        // If CSRF expired or missing on mutation request, refresh token once and retry
+        if (response.status === 403 && typeof errorMessage === "string" && errorMessage.toLowerCase().includes("csrf") && attempt === 0) {
+          try {
+            const csrfRes = await fetch("/api/v1/auth/csrf", { credentials: "include" });
+            if (csrfRes.ok) {
+              const csrfData = await csrfRes.json();
+              const freshToken = csrfData?.csrf_token || getCookie("mc_csrf");
+              if (freshToken) {
+                headers.set("X-CSRF-Token", freshToken);
+                attempt++;
+                continue;
+              }
+            }
+          } catch {}
+        }
+
         const err: any = new Error(errorMessage);
         err.status = response.status;
         err.requestId = errorData.request_id;
@@ -67,6 +98,11 @@ export async function apiClient<T>(
 
       return (await response.json()) as T;
     } catch (err: any) {
+      // Don't retry client errors (400, 401, 403, 404, 422) except potential cold start or 5xx/network errors
+      if (err.status && err.status >= 400 && err.status < 500 && err.status !== 408) {
+        throw err;
+      }
+
       // If network error, 502/503/504, or cold start
       attempt++;
       if (attempt <= maxRetries) {

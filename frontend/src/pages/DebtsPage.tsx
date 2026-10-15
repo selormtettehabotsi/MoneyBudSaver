@@ -151,28 +151,33 @@ export const DebtsPage: React.FC = () => {
 
     setSubmitting(true);
     try {
+      const cleanBalance = remainingBalance.trim() !== "" ? remainingBalance : totalPrincipal;
+      const cleanInterest = interestRate.trim() !== "" ? interestRate : "0.00";
+      const cleanMinPayment = minimumPayment.trim() !== "" ? minimumPayment : "0.00";
+      const cleanNotes = notes.trim() ? notes.trim() : null;
+
       if (editingDebt) {
         await debtsApi.update(editingDebt.id, {
           name: name.trim(),
           total_principal: totalPrincipal,
-          remaining_balance: remainingBalance || totalPrincipal,
-          interest_rate: interestRate || "0.00",
-          minimum_payment: minimumPayment || "0.00",
+          remaining_balance: cleanBalance,
+          interest_rate: cleanInterest,
+          minimum_payment: cleanMinPayment,
           due_day_of_month: dueDay,
           start_date: startDate,
-          notes: notes.trim() || undefined,
+          notes: cleanNotes,
         });
         toastSuccess("Debt details updated.");
       } else {
         await debtsApi.create({
           name: name.trim(),
           total_principal: totalPrincipal,
-          remaining_balance: remainingBalance || totalPrincipal,
-          interest_rate: interestRate || "0.00",
-          minimum_payment: minimumPayment || "0.00",
+          remaining_balance: cleanBalance,
+          interest_rate: cleanInterest,
+          minimum_payment: cleanMinPayment,
           due_day_of_month: dueDay,
           start_date: startDate,
-          notes: notes.trim() || undefined,
+          notes: cleanNotes,
         });
         toastSuccess("Debt recorded.");
       }

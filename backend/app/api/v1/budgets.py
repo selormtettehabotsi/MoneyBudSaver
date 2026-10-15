@@ -151,7 +151,47 @@ async def update_budget(
     if not budget:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found.")
 
-    budget.amount_limit = payload.amount_limit
+    new_category_id = payload.category_id or budget.category_id
+    new_month = payload.month or budget.month
+    new_year = payload.year or budget.year
+
+    if payload.category_id is not None and payload.category_id != budget.category_id:
+        cat = (
+            db.query(Category)
+            .filter(Category.id == payload.category_id, Category.user_id == current_user.id)
+            .first()
+        )
+        if not cat:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category ID.")
+
+    # Check for uniqueness conflict if category, month, or year changed
+    if (new_category_id != budget.category_id or new_month != budget.month or new_year != budget.year):
+        dup = (
+            db.query(Budget)
+            .filter(
+                Budget.user_id == current_user.id,
+                Budget.id != budget.id,
+                Budget.category_id == new_category_id,
+                Budget.month == new_month,
+                Budget.year == new_year,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A budget for this category and month/year already exists.",
+            )
+
+    if payload.amount_limit is not None:
+        budget.amount_limit = payload.amount_limit
+    if payload.month is not None:
+        budget.month = payload.month
+    if payload.year is not None:
+        budget.year = payload.year
+    if payload.category_id is not None:
+        budget.category_id = payload.category_id
+
     db.commit()
     db.refresh(budget)
     return budget

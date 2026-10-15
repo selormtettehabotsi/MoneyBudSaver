@@ -17,6 +17,8 @@ services:
         generateValue: true
       - key: KEEP_ALIVE_ENABLED
         value: "true" # Enables automated 10-minute self-pinging via RENDER_EXTERNAL_URL
+      - key: KEEP_ALIVE_URL
+        value: "https://moneycouncil-7zcr.onrender.com"
       - key: DATABASE_URL
         sync: false # Paste Neon.tech or Supabase PostgreSQL connection string here
       - key: GEMINI_API_KEY

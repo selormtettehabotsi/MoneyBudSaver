@@ -181,16 +181,17 @@ async def update_transaction(
     if not transaction:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
 
-    if payload.category_id is not None:
-        if payload.category_id != "":
+    if "category_id" in payload.model_fields_set:
+        if payload.category_id and payload.category_id.strip():
+            cat_id = payload.category_id.strip()
             category = (
                 db.query(Category)
-                .filter(Category.id == payload.category_id, Category.user_id == current_user.id)
+                .filter(Category.id == cat_id, Category.user_id == current_user.id)
                 .first()
             )
             if not category:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category ID.")
-            transaction.category_id = payload.category_id
+            transaction.category_id = cat_id
         else:
             transaction.category_id = None
 
@@ -204,8 +205,8 @@ async def update_transaction(
         transaction.description = payload.description.strip()
     if payload.is_recurring is not None:
         transaction.is_recurring = payload.is_recurring
-    if payload.tags is not None:
-        transaction.tags = payload.tags
+    if "tags" in payload.model_fields_set:
+        transaction.tags = payload.tags or []
 
     db.commit()
     db.refresh(transaction)

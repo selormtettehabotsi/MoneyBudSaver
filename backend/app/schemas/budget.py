@@ -20,7 +20,10 @@ class BudgetCreate(BudgetBase):
 
 
 class BudgetUpdate(BaseModel):
-    amount_limit: Decimal = Field(..., gt=0, decimal_places=2)
+    amount_limit: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    month: Optional[int] = Field(None, ge=1, le=12)
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    category_id: Optional[str] = None
 
 
 class BudgetOut(BudgetBase):

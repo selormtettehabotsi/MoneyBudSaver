@@ -81,8 +81,30 @@ async def update_category(
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found.")
 
+    target_type = payload.type or category.type
     if payload.name is not None:
-        category.name = payload.name.strip()
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty.")
+        
+        # Check duplicate category name within same type
+        dup = (
+            db.query(Category)
+            .filter(
+                Category.user_id == current_user.id,
+                Category.id != category.id,
+                Category.type == target_type,
+                Category.name.ilike(new_name),
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A {target_type} category named '{new_name}' already exists.",
+            )
+        category.name = new_name
+
     if payload.type is not None:
         category.type = payload.type
     if payload.icon_name is not None:
