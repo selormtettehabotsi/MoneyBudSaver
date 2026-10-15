@@ -201,7 +201,7 @@ export const TransactionsPage: React.FC = () => {
     setEditingTx(tx);
     setAmount(tx.amount);
     setType(tx.type);
-    setDateVal(tx.date);
+    setDateVal(tx.date ? tx.date.split("T")[0] : new Date().toISOString().split("T")[0]);
     setDescription(tx.description);
     setCategoryId(tx.category_id || "");
     setFormError(null);
@@ -229,7 +229,10 @@ export const TransactionsPage: React.FC = () => {
       toastSuccess("Transaction deleted.");
       loadTransactions();
     } catch (err: any) {
-      toastError(err.message || "Failed to delete transaction.");
+      const msg = typeof err?.message === "string" && err.message !== "[object Object]"
+        ? err.message
+        : "Failed to delete transaction.";
+      toastError(msg);
     }
   };
 
@@ -249,12 +252,14 @@ export const TransactionsPage: React.FC = () => {
     }
 
     setSubmitting(true);
+    const cleanDate = dateVal ? dateVal.split("T")[0].trim() : new Date().toISOString().split("T")[0];
+
     try {
       if (editingTx) {
         await transactionsApi.update(editingTx.id, {
           amount,
           type,
-          date: dateVal,
+          date: cleanDate,
           description: description.trim(),
           category_id: categoryId || null,
         });
@@ -263,7 +268,7 @@ export const TransactionsPage: React.FC = () => {
         await createOfflineTransaction({
           amount,
           type,
-          date: dateVal,
+          date: cleanDate,
           description: description.trim(),
           category_id: categoryId || null,
         });
@@ -272,7 +277,10 @@ export const TransactionsPage: React.FC = () => {
       setIsModalOpen(false);
       loadTransactions();
     } catch (err: any) {
-      setFormError(err.message || "Failed to save transaction.");
+      const msg = typeof err?.message === "string" && err.message !== "[object Object]"
+        ? err.message
+        : (typeof err?.rawDetail === "string" ? err.rawDetail : "Failed to save transaction.");
+      setFormError(msg);
     } finally {
       setSubmitting(false);
     }

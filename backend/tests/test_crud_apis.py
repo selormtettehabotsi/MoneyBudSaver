@@ -87,6 +87,33 @@ def test_transaction_crud_and_isolation(make_auth_client):
     assert a_get.status_code == 200
     assert Decimal(a_get.json()["amount"]) == Decimal("1500.00")
 
+    # User A updates transaction with new date, amount, description
+    a_update = client_a.put(
+        f"/api/v1/transactions/{tx_id}",
+        json={
+            "amount": "2000.00",
+            "type": "income",
+            "date": today_str,
+            "description": "Alice Bonus (Updated)",
+            "category_id": None,
+        },
+    )
+    assert a_update.status_code == 200
+    updated_data = a_update.json()
+    assert Decimal(updated_data["amount"]) == Decimal("2000.00")
+    assert updated_data["description"] == "Alice Bonus (Updated)"
+    assert updated_data["date"] == today_str
+
+    # User A updates with ISO datetime string (e.g. from frontend picker)
+    a_update_iso = client_a.put(
+        f"/api/v1/transactions/{tx_id}",
+        json={
+            "date": f"{today_str}T00:00:00.000Z",
+        },
+    )
+    assert a_update_iso.status_code == 200
+    assert a_update_iso.json()["date"] == today_str
+
 
 def test_budget_progress_and_isolation(make_auth_client):
     client_a, user_a = make_auth_client("alice_budget@example.com", "Password123!")

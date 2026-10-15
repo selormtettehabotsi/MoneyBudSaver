@@ -72,7 +72,33 @@ export async function apiClient<T>(
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: "Request failed" }));
-        const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status} Error`;
+        
+        let errorMessage: string;
+        if (typeof errorData.detail === "string" && errorData.detail.trim()) {
+          errorMessage = errorData.detail.trim();
+        } else if (Array.isArray(errorData.detail)) {
+          // FastAPI / Pydantic validation error array: [{ loc: [...], msg: "...", type: "..." }]
+          const formatted = errorData.detail
+            .map((item: any) => {
+              if (typeof item === "string") return item;
+              if (item && typeof item === "object") {
+                const field = Array.isArray(item.loc)
+                  ? item.loc.filter((locPart: any) => locPart !== "body").join(".")
+                  : (item.loc || item.field || "");
+                const msg = item.msg || item.message || JSON.stringify(item);
+                return field ? `${field}: ${msg}` : msg;
+              }
+              return String(item);
+            })
+            .filter(Boolean);
+          errorMessage = formatted.length > 0 ? formatted.join("; ") : `HTTP ${response.status} Error`;
+        } else if (errorData.detail && typeof errorData.detail === "object") {
+          errorMessage = errorData.detail.msg || errorData.detail.message || errorData.detail.error || JSON.stringify(errorData.detail);
+        } else if (typeof errorData.message === "string" && errorData.message.trim()) {
+          errorMessage = errorData.message.trim();
+        } else {
+          errorMessage = `HTTP ${response.status} Error`;
+        }
 
         // If CSRF expired or missing on mutation request, refresh token once and retry
         if (response.status === 403 && typeof errorMessage === "string" && errorMessage.toLowerCase().includes("csrf") && attempt === 0) {
@@ -93,6 +119,7 @@ export async function apiClient<T>(
         const err: any = new Error(errorMessage);
         err.status = response.status;
         err.requestId = errorData.request_id;
+        err.rawDetail = errorData.detail;
         throw err;
       }
 
